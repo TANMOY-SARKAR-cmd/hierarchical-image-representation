@@ -58,9 +58,25 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertEqual(representation["scale_correspondence"]["method"].split(" ")[0], "Hungarian")
             self.assertGreater(len(representation["scale_correspondence"]["links"]), 0)
             self.assertTrue(all(0 <= link["confidence"] <= 1 and link["cost"] <= 0.72 for link in representation["scale_correspondence"]["links"]))
-            self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.3")
-            for relative_path in ("features.npz", "representation.json", "reconstructed.png", "reconstruction.svg", "overlays/relationship-graph.png", "reconstructions/level4.png"):
+            self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.4")
+            self.assertIn("slic", representation["segmentationDiagnostics"])
+            self.assertIn("residual", representation["reconstruction_metadata"]["outputs"])
+            self.assertIn("parametric", representation["reconstruction_metadata"]["rateDistortion"])
+            self.assertTrue(all(entity.get("appearanceModel", {}).get("model") in {"constant", "affine", "quadratic"} for entity in representation["entities"] if entity["type"] == "micro_region"))
+            for relative_path in ("features.npz", "residuals.npz", "representation.json", "reconstructed.png", "reconstruction.svg", "overlays/relationship-graph.png", "reconstructions/level4.png", "reconstructions/parametric.png", "reconstructions/residual.png", "errors/residual-energy.png"):
                 self.assertTrue((output / relative_path).exists(), relative_path)
+
+    def test_alternative_segmentation_strategies_are_deterministic_and_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory); image = np.zeros((36, 48, 3), dtype=np.uint8)
+            image[:, :16] = [35, 110, 220]; image[:, 16:32] = [225, 135, 65]; image[:, 32:] = [65, 190, 125]
+            source = workspace / "fixture.png"; Image.fromarray(image).save(source)
+            for strategy in ("watershed", "felzenszwalb"):
+                output = workspace / strategy
+                payload = json.loads(Path(analyze(source, output, {"maxImagePixels": 10_000, "scaleLevels": [1], "slicSegments": 18, "minimumRegionPixels": 2, "segmentationStrategy": strategy, "compareSegmentationBaselines": True})["representationPath"]).read_text())
+                self.assertEqual(payload["configuration"]["segmentationStrategy"], strategy)
+                self.assertEqual(set(payload["segmentationDiagnostics"]), {"slic", "watershed", "felzenszwalb"})
+                self.assertGreater(payload["segmentationDiagnostics"][strategy]["entityCount"], 0)
 
     def test_directional_relationship_fields_are_antisymmetric_while_distance_is_symmetric(self):
         image = np.zeros((8, 12, 3), dtype=np.uint8)

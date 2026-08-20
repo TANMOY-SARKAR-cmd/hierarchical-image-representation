@@ -11,11 +11,15 @@ class BenchmarkSuiteTest(unittest.TestCase):
             output = Path(directory) / "benchmark"
             subprocess.run(["python3", "python_engine/benchmark_suite.py", "--output", str(output)], check=True, cwd=Path(__file__).resolve().parents[1])
             report = json.loads((output / "benchmark-report.json").read_text())
-            self.assertEqual(report["benchmarkVersion"], "0.2.0")
+            self.assertEqual(report["benchmarkVersion"], "0.4.0")
             self.assertEqual(len(report["records"]), 7)
             first = report["records"][0]
             self.assertEqual(first["provenance"], "synthetic")
             self.assertGreater(first["relationshipCount"], 0)
+            self.assertTrue({"constant", "parametric", "residual"}.issubset(first["reconstructionModes"]))
+            self.assertGreaterEqual(first["reconstructionModes"]["residual"]["psnr"], first["reconstructionModes"]["constant"]["psnr"])
+            self.assertEqual(set(first["segmentationDiagnostics"]), {"slic", "watershed", "felzenszwalb"})
+            self.assertGreater(first["residual"]["estimatedBytes"], 0)
             self.assertTrue(first["codecComparisons"]["PNG"]["available"])
             self.assertGreater(first["codecComparisons"]["JPEG"]["outputBytes"], 0)
             self.assertIn("AVIF", first["codecComparisons"])

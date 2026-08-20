@@ -7,12 +7,13 @@ import json
 from copy import deepcopy
 from typing import Any, Dict
 
-SCHEMA_VERSION = "0.3.0"
-SUPPORTED_VERSIONS = ("0.2.0", "0.3.0")
+SCHEMA_VERSION = "0.4.0"
+SUPPORTED_VERSIONS = ("0.2.0", "0.3.0", "0.4.0")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "maxImagePixels": 786_432,
     "groupingMethod": "slic",
+    "segmentationStrategy": "slic",
     "hierarchyMethod": "graph_agglomerative",
     "scaleLevels": [1, 2, 4, 8],
     "slicSegments": 72,
@@ -28,6 +29,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "shapeWeights": {"compactness": 0.25, "orientation": 0.20, "hu": 0.55},
     "runScaleConsistency": True,
     "maxConsistencyPixels": 786_432,
+    "reconstructionProfile": "balanced",
+    "appearanceModelCandidates": ["constant", "affine", "quadratic"],
+    "modelPenalty": 0.00045,
+    "boundaryLeakagePenalty": 0.00015,
+    "residualEnabled": True,
+    "residualQuantization": 4,
+    "residualBudgetBytes": 196_608,
+    "rateDistortionLambda": 0.0015,
+    "compareSegmentationBaselines": False,
 }
 
 
@@ -56,4 +66,6 @@ def read_compatible_representation(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Unsupported representation version: {version or 'missing'}.")
     if version == "0.2.0":
         return {"version": version, "entities": payload.get("entities", []), "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "legacy-v0.2"}
-    return {"version": version, "entities": payload.get("entities", []), "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.3"}
+    if version == "0.3.0":
+        return {"version": version, "entities": payload.get("entities", []), "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.3"}
+    return {"version": version, "entities": payload.get("entities", []), "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.4"}

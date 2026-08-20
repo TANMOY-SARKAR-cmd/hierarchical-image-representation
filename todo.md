@@ -55,3 +55,13 @@
 - [x] Add explicit root, parent-depth, cycle, correspondence-confidence, and correspondence-cost invariants to v0.3 engine tests.
 - [x] Add a merge-lineage inspector and a cross-resolution correspondence panel to the workbench.
 - [x] Add a v0.2-to-v0.3 migration section and full affinity/correspondence formula definitions to the representation documentation.
+- [x] Define v0.4-compatible reconstruction configuration, appearance-model, residual, rate-distortion, and artifact contracts.
+- [x] Implement deterministic constant, affine, and quadratic Lab-space entity appearance models with stable fallbacks and model-selection diagnostics.
+- [x] Implement bounded residual reconstruction artifacts, including quantization, residual coverage, and baseline/parametric/residual output comparison.
+- [x] Add pluggable watershed and Felzenszwalb segmentation strategies alongside SLIC and report comparable segmentation diagnostics.
+- [x] Add rate-distortion scoring for adaptive model selection and reconstruction-mode comparison, including artifact-size and runtime reporting.
+- [x] Extend the server bridge and typed router for advanced reconstruction profiles, segmentation strategies, residual budgets, and new artifact outputs.
+- [x] Add advanced workbench controls, baseline/parametric/residual comparisons, error overlays, local model inspection, and rate-distortion diagnostics.
+- [x] Add deterministic tests and benchmark coverage for models, residuals, segmentation strategies, quality metrics, and compatibility.
+- [x] Document the v0.4 reconstruction methodology, private-fixture policy, limitations, and deferred non-deterministic methods.
+- [ ] Validate, checkpoint, synchronize, and deliver the advanced reconstruction-fidelity upgrade.

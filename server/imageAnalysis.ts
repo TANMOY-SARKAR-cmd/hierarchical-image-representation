@@ -8,7 +8,8 @@ import { storagePut } from "./storage";
 export type AnalysisConfig = {
   maxFileSizeBytes: number;
   maxImagePixels: number;
-  groupingMethod: "slic";
+  groupingMethod: "slic" | "watershed" | "felzenszwalb";
+  segmentationStrategy: "slic" | "watershed" | "felzenszwalb";
   hierarchyMethod: "graph_agglomerative";
   scaleLevels: number[];
   slicSegments: number;
@@ -22,11 +23,21 @@ export type AnalysisConfig = {
   edgeBarrierThreshold: number;
   maxEntityAreaFraction: number;
   complexityMergePenalty: number;
+  reconstructionProfile: "fast" | "balanced" | "accurate";
+  appearanceModelCandidates: Array<"constant" | "affine" | "quadratic">;
+  modelPenalty: number;
+  boundaryLeakagePenalty: number;
+  residualEnabled: boolean;
+  residualQuantization: number;
+  residualBudgetBytes: number;
+  rateDistortionLambda: number;
+  compareSegmentationBaselines: boolean;
 };
 
 export type AnalysisArtifactUrls = {
   representationJson: string;
   featuresNpz: string;
+  residualsNpz: string;
   reconstructedPng: string;
   svg: string;
   overlays: Record<string, string>;
@@ -133,6 +144,7 @@ export async function analyzeImage(input: {
       gradientX: await uploadArtifact(jobId, outputPath, "overlays/gradient-x.png", "image/png"),
       gradientY: await uploadArtifact(jobId, outputPath, "overlays/gradient-y.png", "image/png"),
       complexity: await uploadArtifact(jobId, outputPath, "overlays/complexity.png", "image/png"),
+      residualEnergy: await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png"),
       relationshipGraph: await uploadArtifact(jobId, outputPath, "overlays/relationship-graph.png", "image/png"),
       normalizedDistanceGraph: await uploadArtifact(jobId, outputPath, "overlays/normalized-distance-graph.png", "image/png"),
     };
@@ -142,14 +154,20 @@ export async function analyzeImage(input: {
       level3: await uploadArtifact(jobId, outputPath, "reconstructions/level3.png", "image/png"),
       level4: await uploadArtifact(jobId, outputPath, "reconstructions/level4.png", "image/png"),
       full: await uploadArtifact(jobId, outputPath, "reconstructions/full.png", "image/png"),
+      constant: await uploadArtifact(jobId, outputPath, "reconstructions/constant.png", "image/png"),
+      parametric: await uploadArtifact(jobId, outputPath, "reconstructions/parametric.png", "image/png"),
+      residual: await uploadArtifact(jobId, outputPath, "reconstructions/residual.png", "image/png"),
     };
     const errors = {
       absolutePixelError: await uploadArtifact(jobId, outputPath, "errors/absolute-error.png", "image/png"),
+      parametricError: await uploadArtifact(jobId, outputPath, "errors/parametric-error.png", "image/png"),
       perRegionError: await uploadArtifact(jobId, outputPath, "errors/per-region-error.png", "image/png"),
+      residualEnergy: await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png"),
     };
     const artifactUrls: AnalysisArtifactUrls = {
       representationJson: await uploadArtifact(jobId, outputPath, "representation.json", "application/json"),
       featuresNpz: await uploadArtifact(jobId, outputPath, "features.npz", "application/octet-stream"),
+      residualsNpz: await uploadArtifact(jobId, outputPath, "residuals.npz", "application/octet-stream"),
       reconstructedPng: await uploadArtifact(jobId, outputPath, "reconstructed.png", "image/png"),
       svg: await uploadArtifact(jobId, outputPath, "reconstruction.svg", "image/svg+xml"),
       overlays: overlayUrls,

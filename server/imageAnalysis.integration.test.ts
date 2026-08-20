@@ -46,15 +46,16 @@ describe("Node-to-Python image analysis integration", () => {
     expect(representation.relationships.length).toBeGreaterThan(0);
     expect(representation.metrics.ssim).toBeGreaterThanOrEqual(0);
     expect(representation.metrics.processingTimeMs).toBeGreaterThan(0);
-    expect(uploadedArtifacts).toHaveLength(18);
+    expect(uploadedArtifacts).toHaveLength(25);
 
     const jsonArtifact = uploadedArtifacts.find(item => item.contentType === "application/json");
-    const npzArtifact = uploadedArtifacts.find(item => item.contentType === "application/octet-stream");
+    const npzArtifacts = uploadedArtifacts.filter(item => item.contentType === "application/octet-stream");
     const pngArtifacts = uploadedArtifacts.filter(item => item.contentType === "image/png");
     const svgArtifact = uploadedArtifacts.find(item => item.contentType === "image/svg+xml");
-    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ representation_version: "0.3.0", hierarchy: { grouping: "connectivity-constrained graph agglomeration" } });
-    expect(npzArtifact?.data.subarray(0, 4).toString("latin1")).toBe("PK\u0003\u0004");
-    expect(pngArtifacts).toHaveLength(15);
+    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ representation_version: "0.4.0", hierarchy: { grouping: "connectivity-constrained graph agglomeration" }, reconstruction_metadata: { outputs: { parametric: expect.any(Object), residual: expect.any(Object) } } });
+    expect(npzArtifacts).toHaveLength(2);
+    expect(npzArtifacts.every(item => item.data.subarray(0, 4).toString("latin1") === "PK\u0003\u0004")).toBe(true);
+    expect(pngArtifacts).toHaveLength(21);
     expect(pngArtifacts.every(item => item.data.subarray(1, 4).toString("ascii") === "PNG")).toBe(true);
     expect(svgArtifact?.data.toString("utf8").trimStart()).toMatch(/^<svg/);
   }, 120_000);

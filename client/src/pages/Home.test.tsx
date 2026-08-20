@@ -18,7 +18,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 import Home, { filterRelationships } from "./Home";
 
 const baseRelationship = { sourceId: "micro-1", targetId: "micro-2", distance: 8, angle: 0, sizeRatio: 1, colorDistance: 2, colorSimilarity: 0.95, shapeSimilarity: 0.9, textureSimilarity: 0.8, brightnessDifference: 0.02, brightnessRatio: 1.02, normalizedDx: 0.05, normalizedDy: 0, boundaryContactRatio: 0.25, containmentRatio: 0, overlapRatio: 0, containment: "none" };
-const makeEntity = (id: string, children: string[] = []) => ({ id, type: id === "image-root" ? "image" : "micro_region", level: id === "image-root" ? 5 : 1, scaleFactor: 1, geometry: { boundingBox: [0, 0, 10, 10], centroid: id === "micro-1" ? [4, 4] : [12, 12], area: 64, perimeter: 32, orientation: 0, compactness: 0.7 }, appearance: { meanRGB: [20, 140, 210], brightness: 0.52, varianceRGB: [1, 1, 1] }, statistics: { memberPixelCount: 64, complexity: 0.4 }, vector: { schema: "RegionVector@0.2", dimension: 20, values: Array.from({ length: 20 }, () => 0), provenance: "pixel_aggregate", aggregation: "mean" }, memberPixels: [], children, parentId: id === "image-root" ? null : "image-root", crossScaleParentId: null });
+const makeEntity = (id: string, children: string[] = []) => ({ id, type: id === "image-root" ? "image" : "micro_region", level: id === "image-root" ? 5 : 1, scaleFactor: 1, geometry: { boundingBox: [0, 0, 10, 10], centroid: id === "micro-1" ? [4, 4] : [12, 12], area: 64, perimeter: 32, orientation: 0, compactness: 0.7 }, appearance: { meanRGB: [20, 140, 210], brightness: 0.52, varianceRGB: [1, 1, 1] }, appearanceModel: { model: "affine", parameterCount: 9, mseLab: 0.004, boundaryLeakage: 0.01 }, statistics: { memberPixelCount: 64, complexity: 0.4 }, vector: { schema: "RegionVector@0.2", dimension: 20, values: Array.from({ length: 20 }, () => 0), provenance: "pixel_aggregate", aggregation: "mean" }, memberPixels: [], children, parentId: id === "image-root" ? null : "image-root", crossScaleParentId: null });
 const completedResult = {
   representation: {
     image: { width: 24, height: 24, sourceBytes: 120 },
@@ -28,9 +28,9 @@ const completedResult = {
       { ...baseRelationship, targetId: "image-root", normalizedDistance: 0.45, confidence: 0.7, relationshipType: ["similar_color"], primaryType: "similar_color", adjacent: false },
     ],
     metrics: { mse: 0, psnr: 99, ssim: 1, processingTimeMs: 10, representationBytes: 100, representationOverhead: 1 },
-    hierarchy: { rootId: "image-root" }, feature_schema: { PixelVector: { fields: [] }, RegionVector: { fields: [], dimension: 20 } }, scales: [], reconstruction_metadata: { outputs: {} }, scale_consistency: { status: "completed" }, profiling: {},
+    hierarchy: { rootId: "image-root" }, feature_schema: { PixelVector: { fields: [] }, RegionVector: { fields: [], dimension: 20 } }, scales: [], segmentationDiagnostics: { slic: { strategy: "slic", entityCount: 72, meanBoundaryEdgeStrength: 0.11, requestedSegments: 72 }, watershed: { strategy: "watershed", entityCount: 68, meanBoundaryEdgeStrength: 0.15, requestedSegments: 72 } }, reconstruction_metadata: { outputs: { constant: { psnr: 24.1, ssim: 0.81 }, parametric: { psnr: 30.2, ssim: 0.91 }, residual: { psnr: 35.8, ssim: 0.96 } }, rateDistortion: { constant: { score: 0.09, estimatedBytes: 640 }, parametric: { score: 0.05, estimatedBytes: 920 }, residual: { score: 0.02, estimatedBytes: 1300 } } }, scale_consistency: { status: "completed" }, profiling: {},
   },
-  artifactUrls: { representationJson: "/representation.json", featuresNpz: "/features.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: { relationshipGraph: "/relationship.png", normalizedDistanceGraph: "/distance.png" }, reconstructions: { full: "/reconstructed.png" }, errors: {} },
+  artifactUrls: { representationJson: "/representation.json", featuresNpz: "/features.npz", residualsNpz: "/residuals.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: { relationshipGraph: "/relationship.png", normalizedDistanceGraph: "/distance.png" }, reconstructions: { full: "/reconstructed.png", constant: "/constant.png", parametric: "/parametric.png", residual: "/residual.png" }, errors: {} },
 };
 
 describe("Hierarchy workbench UI", () => {
@@ -82,6 +82,13 @@ describe("Hierarchy workbench UI", () => {
     fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
     await view.findByRole("button", { name: "adjacent" });
     expect(view.getByText("2/2")).toBeInTheDocument();
+    expect(view.getByText("Adaptive reconstruction")).toBeInTheDocument();
+    expect(view.getByText("Rate–distortion score")).toBeInTheDocument();
+    expect(view.getByText("Segmentation diagnostics")).toBeInTheDocument();
+    expect(view.getByText("72 regions")).toBeInTheDocument();
+    expect(view.getByRole("link", { name: /download residual npz/i })).toHaveAttribute("href", "/residuals.npz");
+    fireEvent.click(view.getByRole("button", { name: "MODEL" }));
+    expect(view.getByText("PARAMETRIC")).toBeInTheDocument();
 
     fireEvent.click(view.getByRole("button", { name: "similar color" }));
     expect(view.getByText("1/2")).toBeInTheDocument();

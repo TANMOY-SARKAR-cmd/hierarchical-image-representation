@@ -41,6 +41,7 @@ type Entity = {
   parentId: string | null;
   crossScaleParentId: string | null;
   lineage?: { operation: string; parents: string[] };
+  appearanceModel?: { schema: string; model: "constant" | "affine" | "quadratic"; parameterCount: number; mseLab: number; selectionScore: number; boundaryLeakage: number; coefficients: number[][] };
 };
 type Relationship = {
   sourceId: string;
@@ -81,11 +82,12 @@ type Representation = {
   experiment?: { id: string; engineVersion: string; configHash: string; algorithm: string };
   feature_schema: { PixelVector: { fields: string[] }; RegionVector?: { fields: string[]; dimension: number }; EntityVector?: { schema: string; categories: string[] } };
   scales: Array<{ scaleFactor: number; entityCount: number; segmentationCharacteristics: { meanComplexity: number; actualSegments: number }; reconstructionError: { psnr: number; ssim: number } }>;
-  reconstruction_metadata: { outputs: Record<string, { entityCount: number; mse: number; psnr: number; ssim: number }> };
+  reconstruction_metadata: { outputs: Record<string, { entityCount: number; mse: number; psnr: number; ssim: number; model?: string; residual?: { coverage: number; estimatedBytes: number } }>; rateDistortion?: Record<string, { distortion: number; estimatedBytes: number; normalizedRate: number; score: number }>; residual?: { coverage: number; estimatedBytes: number; quantizationStep: number } };
   scale_consistency: { status: string; centroidStability?: number; sizeRatioStability?: number; brightnessStability?: number; colorStability?: number; relationshipStability?: number };
   validity?: { connectivityScore: number; leafCoverage: number; parentAreaConservationError: number; hierarchyCycleCount: number; valid: boolean };
   graph_metadata?: { relationshipDensity: number; candidateSources: string[] };
   scale_correspondence?: { method: string; links: Array<{ sourceId: string; targetId: string; confidence: number; cost: number; iou: number; centroidDistance: number }> };
+  segmentationDiagnostics?: Record<string, { strategy: string; entityCount: number; meanBoundaryEdgeStrength: number; requestedSegments: number }>;
   profiling: Record<string, number>;
 };
 
@@ -99,7 +101,9 @@ const overlays = [
   { id: "relationshipGraph", label: "Relationship graph" },
   { id: "normalizedDistanceGraph", label: "Normalized distance graph" },
   { id: "absolutePixelError", label: "Absolute error map" },
+  { id: "parametricError", label: "Parametric error map" },
   { id: "perRegionError", label: "Per-region error" },
+  { id: "residualEnergy", label: "Residual energy" },
 ] as const;
 
 const availableScales = [1, 2, 4, 8];
@@ -210,18 +214,33 @@ function V03InspectionPanels({ representation, selectedEntity }: { representatio
  * All content in this page are only for example, replace with your own feature implementation
  * When building pages, remember your instructions in Frontend Workflow, Frontend Best Practices, Design Guide and Common Pitfalls
  */
+function V04ReconstructionPanel({ representation, selectedEntity }: { representation: Representation | null; selectedEntity: Entity | null }) {
+  const model = selectedEntity?.appearanceModel;
+  const rates = representation?.reconstruction_metadata.rateDistortion;
+  return <section className="rounded-xl border border-emerald-200/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Sparkles className="h-4 w-4 text-emerald-300" /> Adaptive reconstruction</div>{representation ? <div className="space-y-3 text-xs"><div className="grid grid-cols-3 gap-1.5">{(["constant", "parametric", "residual"] as const).map(mode => { const item = representation.reconstruction_metadata.outputs[mode]; return <div key={mode} className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[8px] uppercase text-slate-500">{mode}</p><p className="mt-1 font-mono text-[11px] text-emerald-100">{item?.psnr?.toFixed(1) ?? "—"} dB</p><p className="font-mono text-[9px] text-slate-500">SSIM {item?.ssim?.toFixed(3) ?? "—"}</p></div>;})}</div><div className="rounded border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">Selected entity model</p>{model ? <><p className="mt-1 font-mono text-sm text-emerald-100">{model.model.toUpperCase()} · {model.parameterCount} parameters</p><p className="mt-1 font-mono text-[10px] text-slate-400">Lab MSE {model.mseLab.toExponential(2)} · edge leakage {model.boundaryLeakage.toFixed(3)}</p></> : <p className="mt-1 text-xs text-slate-500">Select a micro-region to inspect its local appearance model.</p>}</div>{rates ? <div><p className="mb-1 font-mono text-[9px] uppercase tracking-wider text-slate-500">Rate–distortion score</p><div className="space-y-1">{Object.entries(rates).map(([mode, value]) => <div key={mode} className="flex justify-between rounded border border-white/6 bg-black/15 px-2 py-1 font-mono text-[9px]"><span className="text-slate-400">{mode}</span><span className="text-cyan-200">{value.score.toFixed(4)} · {formatBytes(value.estimatedBytes)}</span></div>)}</div></div> : null}</div> : <p className="text-xs leading-relaxed text-slate-500">Run a v0.4 analysis to compare constant, adaptive-Lab, and bounded-residual outputs.</p>}</section>;
+}
+
+function SegmentationDiagnosticsPanel({ representation }: { representation: Representation | null }) {
+  const diagnostics = Object.values(representation?.segmentationDiagnostics ?? {});
+  return <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Layers3 className="h-4 w-4 text-cyan-300" /> Segmentation diagnostics</div>{representation ? diagnostics.length ? <div className="space-y-1.5"><p className="mb-2 text-[11px] leading-relaxed text-slate-500">The server measures baseline partitioning without moving image processing into the browser.</p>{diagnostics.map(item => <div key={item.strategy} className="grid grid-cols-[1fr_auto] gap-x-3 rounded border border-white/8 bg-black/20 px-2.5 py-2 font-mono text-[10px]"><span className="uppercase tracking-wider text-cyan-100">{item.strategy}</span><span className="text-slate-300">{item.entityCount} regions</span><span className="text-slate-500">requested {item.requestedSegments}</span><span className="text-emerald-200">edge {item.meanBoundaryEdgeStrength.toFixed(3)}</span></div>)}</div> : <p className="text-xs leading-relaxed text-slate-500">Enable baseline comparison before analysis to report SLIC, watershed, and Felzenszwalb partition diagnostics.</p> : <p className="text-xs leading-relaxed text-slate-500">Segmentation diagnostics become available after a v0.4 analysis.</p>}</section>;
+}
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [representation, setRepresentation] = useState<Representation | null>(null);
-  const [artifacts, setArtifacts] = useState<{ representationJson: string; featuresNpz: string; reconstructedPng: string; svg: string; overlays: Record<string, string>; reconstructions: Record<string, string>; errors: Record<string, string> } | null>(null);
+  const [artifacts, setArtifacts] = useState<{ representationJson: string; featuresNpz: string; residualsNpz?: string; reconstructedPng: string; svg: string; overlays: Record<string, string>; reconstructions: Record<string, string>; errors: Record<string, string> } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedOverlay, setSelectedOverlay] = useState<(typeof overlays)[number]["id"]>("none");
   const [scaleLevels, setScaleLevels] = useState<number[]>([1, 2, 4, 8]);
   const [maxFileSizeMb, setMaxFileSizeMb] = useState(8);
   const [slicSegments, setSlicSegments] = useState(72);
   const [compactness, setCompactness] = useState(10);
-  const [reconstructionLevel, setReconstructionLevel] = useState<"level1" | "level2" | "level3" | "level4" | "full">("full");
+  const [segmentationStrategy, setSegmentationStrategy] = useState<"slic" | "watershed" | "felzenszwalb">("slic");
+  const [reconstructionProfile, setReconstructionProfile] = useState<"fast" | "balanced" | "accurate">("balanced");
+  const [residualEnabled, setResidualEnabled] = useState(true);
+  const [residualBudgetKb, setResidualBudgetKb] = useState(192);
+  const [reconstructionLevel, setReconstructionLevel] = useState<string>("residual");
   const [selectedRelationshipTypes, setSelectedRelationshipTypes] = useState<string[]>([]);
   const [adjacentOnly, setAdjacentOnly] = useState(false);
   const [minimumConfidence, setMinimumConfidence] = useState(0);
@@ -238,7 +257,7 @@ export default function Home() {
   );
   const root = representation ? entities.get(representation.hierarchy.rootId) ?? null : null;
   const relationshipOverlayActive = selectedOverlay === "relationshipGraph" || selectedOverlay === "normalizedDistanceGraph";
-  const overlayUrl = selectedOverlay === "none" || relationshipOverlayActive ? null : selectedOverlay === "absolutePixelError" ? artifacts?.errors.absolutePixelError ?? null : selectedOverlay === "perRegionError" ? artifacts?.errors.perRegionError ?? null : artifacts?.overlays[selectedOverlay] ?? null;
+  const overlayUrl = selectedOverlay === "none" || relationshipOverlayActive ? null : selectedOverlay === "absolutePixelError" ? artifacts?.errors.absolutePixelError ?? null : selectedOverlay === "parametricError" ? artifacts?.errors.parametricError ?? null : selectedOverlay === "perRegionError" ? artifacts?.errors.perRegionError ?? null : selectedOverlay === "residualEnergy" ? artifacts?.errors.residualEnergy ?? null : artifacts?.overlays[selectedOverlay] ?? null;
   const reconstructionUrl = artifacts?.reconstructions[reconstructionLevel] ?? artifacts?.reconstructedPng ?? null;
   const parentChain = useMemo(() => {
     const chain: Entity[] = [];
@@ -291,7 +310,8 @@ export default function Home() {
         config: {
           maxFileSizeBytes: maxFileSizeMb * 1024 * 1024,
           maxImagePixels: 786432,
-          groupingMethod: "slic",
+          groupingMethod: segmentationStrategy,
+          segmentationStrategy,
           hierarchyMethod: "graph_agglomerative",
           scaleLevels,
           slicSegments,
@@ -305,6 +325,15 @@ export default function Home() {
           edgeBarrierThreshold: 0.70,
           maxEntityAreaFraction: 0.72,
           complexityMergePenalty: 0.35,
+          reconstructionProfile,
+          appearanceModelCandidates: reconstructionProfile === "fast" ? ["constant", "affine"] : ["constant", "affine", "quadratic"],
+          modelPenalty: reconstructionProfile === "accurate" ? 0.00025 : reconstructionProfile === "fast" ? 0.0008 : 0.00045,
+          boundaryLeakagePenalty: 0.00015,
+          residualEnabled,
+          residualQuantization: reconstructionProfile === "accurate" ? 2 : reconstructionProfile === "fast" ? 8 : 4,
+          residualBudgetBytes: residualEnabled ? residualBudgetKb * 1024 : 0,
+          rateDistortionLambda: 0.0015,
+          compareSegmentationBaselines: reconstructionProfile === "accurate",
         },
       });
       const parsed = result.representation as unknown as Representation;
@@ -379,6 +408,9 @@ export default function Home() {
                   {availableScales.map(scale => <Button key={scale} type="button" variant="outline" size="sm" onClick={() => toggleScale(scale)} className={cn("border-white/10 bg-white/[0.025] font-mono text-xs text-slate-400 hover:bg-white/10", scaleLevels.includes(scale) && "border-cyan-300/50 bg-cyan-300/10 text-cyan-100")}>{scale}×</Button>)}
                 </div>
               </div>
+              <div><Label className="mb-2 block text-xs text-slate-300">Segmentation baseline</Label><div className="grid grid-cols-3 gap-1">{(["slic", "watershed", "felzenszwalb"] as const).map(strategy => <Button key={strategy} type="button" variant="outline" size="sm" onClick={() => setSegmentationStrategy(strategy)} className={cn("h-7 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", segmentationStrategy === strategy && "border-cyan-300/45 bg-cyan-300/10 text-cyan-100")}>{strategy === "felzenszwalb" ? "GRAPH" : strategy.toUpperCase()}</Button>)}</div></div>
+              <div><Label className="mb-2 block text-xs text-slate-300">Reconstruction profile</Label><div className="grid grid-cols-3 gap-1">{(["fast", "balanced", "accurate"] as const).map(profile => <Button key={profile} type="button" variant="outline" size="sm" onClick={() => setReconstructionProfile(profile)} className={cn("h-7 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", reconstructionProfile === profile && "border-emerald-300/45 bg-emerald-300/10 text-emerald-100")}>{profile.toUpperCase()}</Button>)}</div></div>
+              <div><div className="mb-2 flex items-center justify-between"><Label className="text-xs text-slate-300">Residual detail</Label><Button type="button" variant="outline" size="sm" onClick={() => setResidualEnabled(value => !value)} className={cn("h-6 border-white/10 bg-black/20 px-2 font-mono text-[9px]", residualEnabled ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : "text-slate-500")}>{residualEnabled ? "ON" : "OFF"}</Button></div><div className={cn(!residualEnabled && "opacity-40")}><div className="mb-1 flex justify-between font-mono text-[9px] text-slate-500"><span>Residual budget</span><span>{residualBudgetKb} KB</span></div><Slider value={[residualBudgetKb]} onValueChange={value => setResidualBudgetKb(value[0] ?? 192)} min={0} max={512} step={16} disabled={!residualEnabled} /></div></div>
               <Button className="h-10 w-full bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={runAnalysis} disabled={!file || processMutation.isPending}>
                 {processMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Building hierarchy…</> : <><Sparkles className="mr-2 h-4 w-4" /> Run analysis</>}
               </Button>
@@ -391,6 +423,7 @@ export default function Home() {
               {overlays.map(overlay => <button type="button" key={overlay.id} onClick={() => setSelectedOverlay(overlay.id)} disabled={overlay.id !== "none" && !artifacts} className={cn("flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs transition-colors", selectedOverlay === overlay.id ? "bg-cyan-300/10 text-cyan-100" : "text-slate-400 hover:bg-white/5 hover:text-slate-200", !artifacts && overlay.id !== "none" && "cursor-not-allowed opacity-40")}><span>{overlay.label}</span>{selectedOverlay === overlay.id ? <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" /> : null}</button>)}
             </div>
           </section>
+          <section className="rounded-xl border border-emerald-200/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Sparkles className="h-4 w-4 text-emerald-300" /> Advanced outputs</div><div className="grid grid-cols-3 gap-1.5">{(["constant", "parametric", "residual"] as const).map(mode => <Button key={mode} type="button" variant="outline" size="sm" disabled={!artifacts} onClick={() => setReconstructionLevel(mode)} className={cn("h-8 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", reconstructionLevel === mode && "border-emerald-300/45 bg-emerald-300/10 text-emerald-100")}>{mode === "constant" ? "BASE" : mode === "parametric" ? "MODEL" : "DETAIL"}</Button>)}</div><p className="mt-2 text-[11px] leading-relaxed text-slate-500">Compare flat region colour, local Lab models, and the bounded residual reconstruction.</p>{artifacts?.residualsNpz ? <a href={artifacts.residualsNpz} className="mt-3 flex items-center gap-2 rounded border border-emerald-300/15 bg-emerald-300/[0.04] px-2 py-2 font-mono text-[10px] text-emerald-100 hover:bg-emerald-300/[0.09]"><FileArchive className="h-3.5 w-3.5" /> Download residual NPZ <Download className="ml-auto h-3 w-3" /></a> : null}</section>
           <GraphEdgeFilterPanel representation={representation} relationshipTypes={relationshipTypes} filteredCount={filteredRelationships.length} selectedTypes={selectedRelationshipTypes} setSelectedTypes={setSelectedRelationshipTypes} adjacentOnly={adjacentOnly} setAdjacentOnly={setAdjacentOnly} minimumConfidence={minimumConfidence} setMinimumConfidence={setMinimumConfidence} maximumNormalizedDistance={maximumNormalizedDistance} setMaximumNormalizedDistance={setMaximumNormalizedDistance} />
         </aside>
 
@@ -411,6 +444,8 @@ export default function Home() {
 
         <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
           <V03InspectionPanels representation={representation} selectedEntity={selectedEntity} />
+          <V04ReconstructionPanel representation={representation} selectedEntity={selectedEntity} />
+          <SegmentationDiagnosticsPanel representation={representation} />
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Network className="h-4 w-4 text-cyan-300" /> Graph hierarchy evidence</div>{representation ? <div className="space-y-3 text-xs"><div className="rounded border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">Experiment</p><p className="mt-1 font-mono text-xs text-cyan-100">{representation.experiment?.engineVersion ?? representation.representation_version ?? "legacy"} · {representation.experiment?.algorithm ?? "deterministic hierarchy"}</p><p className="mt-1 break-all font-mono text-[9px] text-slate-500">{representation.experiment?.configHash ?? "configuration hash unavailable"}</p></div><div className="grid grid-cols-2 gap-2">{[["Connectivity", representation.validity?.connectivityScore ?? 0], ["Leaf coverage", representation.validity?.leafCoverage ?? 0], ["Area error", representation.validity?.parentAreaConservationError ?? 0], ["Graph density", representation.graph_metadata?.relationshipDensity ?? 0]].map(([label, value]) => <div key={String(label)} className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">{label}</p><p className="mt-1 font-mono text-sm text-slate-200">{Number(value).toFixed(3)}</p></div>)}</div><p className={cn("font-mono text-[10px] uppercase tracking-wider", representation.validity?.valid ? "text-emerald-200" : "text-amber-200")}>{representation.validity?.valid ? "Invariant checks passed" : "Review representation invariants"}</p></div> : <p className="text-xs leading-relaxed text-slate-500">v0.3 reports graph affinity, connectivity, coverage, and canonical geometry invariants after analysis.</p>}</section>
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Activity className="h-4 w-4 text-cyan-300" /> Quality metrics</div>{representation ? <div className="grid grid-cols-2 gap-2">{[["PSNR", `${representation.metrics.psnr.toFixed(2)} dB`, "cyan"], ["SSIM", representation.metrics.ssim.toFixed(4), "emerald"], ["MSE", representation.metrics.mse.toFixed(2), "amber"], ["Overhead", `${representation.metrics.representationOverhead.toFixed(1)}×`, "violet"], ["Runtime", `${representation.metrics.processingTimeMs.toFixed(0)} ms`, "cyan"], ["Artifact", formatBytes(representation.metrics.representationBytes), "slate"]].map(([label, value, tone]) => <div key={label} className="rounded-md border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500">{label}</p><p className={cn("mt-1 font-mono text-sm font-semibold", tone === "cyan" ? "text-cyan-200" : tone === "emerald" ? "text-emerald-200" : tone === "amber" ? "text-amber-200" : tone === "violet" ? "text-violet-200" : "text-slate-200")}>{value}</p></div>)}</div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Fidelity and artifact metrics appear after region decoding.</p>}</section>
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Boxes className="h-4 w-4 text-cyan-300" /> Entity inspector</div>{selectedEntity ? <div className="space-y-4 text-xs"><div><p className="font-mono text-[10px] uppercase tracking-[0.15em] text-cyan-300">{selectedEntity.type.replace("_", " ")} · L{selectedEntity.level}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-500">{selectedEntity.id}</p></div><div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md border border-white/8 bg-black/20 p-3"><span className="text-slate-500">Bounding box</span><span className="font-mono text-right text-slate-200">[{selectedEntity.geometry.boundingBox.join(", ")}]</span><span className="text-slate-500">Centroid</span><span className="font-mono text-right text-slate-200">({selectedEntity.geometry.centroid.map(value => value.toFixed(1)).join(", ")})</span><span className="text-slate-500">Area</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.area} px</span><span className="text-slate-500">Perimeter</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.perimeter.toFixed(1)}</span><span className="text-slate-500">Orientation</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.orientation.toFixed(1)}°</span><span className="text-slate-500">Mean RGB</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.meanRGB.map(value => value.toFixed(0)).join(", ")}</span><span className="text-slate-500">Brightness</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.brightness.toFixed(3)}</span><span className="text-slate-500">Members</span><span className="font-mono text-right text-slate-200">{selectedEntity.statistics.memberPixelCount}</span></div><div><p className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500">Relationships · {entityRelationships.length}</p><div className="max-h-40 space-y-1 overflow-auto pr-1">{entityRelationships.slice(0, 12).map(relationship => <div key={`${relationship.sourceId}-${relationship.targetId}`} className="rounded border border-white/7 bg-black/15 p-2 font-mono text-[10px] text-slate-400"><span className={relationship.adjacent ? "text-emerald-300" : "text-slate-500"}>{relationship.primaryType.toUpperCase()}</span> · d {relationship.normalizedDistance.toFixed(3)} · Δc {relationship.colorDistance.toFixed(1)} · θ {relationship.angle.toFixed(1)}°</div>) || <p className="text-slate-600">No sparse relationships for this entity.</p>}</div></div></div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Choose an entity in the hierarchy to inspect its exact geometry, appearance, vectors, and graph relationships.</p>}</section>

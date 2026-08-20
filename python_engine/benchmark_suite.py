@@ -19,13 +19,15 @@ import numpy as np
 from PIL import Image, ImageDraw, features
 from skimage import data as skimage_data
 
-from representation_engine_v2 import analyze, metrics_for
+from engine import analyze
+from reconstruction import metrics_for
 
 
 DEFAULT_CONFIG = {
     "maxFileSizeBytes": 8 * 1024 * 1024,
     "maxImagePixels": 786_432,
     "groupingMethod": "slic",
+    "segmentationStrategy": "slic",
     "scaleLevels": [1, 2, 4, 8],
     "slicSegments": 72,
     "slicCompactness": 10,
@@ -33,6 +35,15 @@ DEFAULT_CONFIG = {
     "hierarchyGroupSize": 3,
     "runScaleConsistency": False,
     "maxConsistencyPixels": 786_432,
+    "reconstructionProfile": "balanced",
+    "appearanceModelCandidates": ["constant", "affine", "quadratic"],
+    "modelPenalty": 0.00045,
+    "boundaryLeakagePenalty": 0.00015,
+    "residualEnabled": True,
+    "residualQuantization": 4,
+    "residualBudgetBytes": 196_608,
+    "rateDistortionLambda": 0.0015,
+    "compareSegmentationBaselines": True,
 }
 
 
@@ -149,18 +160,23 @@ def record_for(source: Path, category: str, provenance: str, output_dir: Path) -
         "representationBytes": representation["metrics"]["representationBytes"],
         "reconstructionBytes": representation["metrics"]["reconstructedBytes"],
         "quality": {key: representation["metrics"][key] for key in ("mse", "psnr", "ssim", "processingTimeMs", "representationOverhead")},
+        "reconstructionModes": {name: {key: output[key] for key in ("mse", "psnr", "ssim", "entityCount") if key in output} for name, output in representation["reconstruction_metadata"]["outputs"].items()},
+        "rateDistortion": representation["reconstruction_metadata"]["rateDistortion"],
+        "segmentationDiagnostics": representation["segmentationDiagnostics"],
+        "residual": representation["reconstruction_metadata"]["residual"],
         "codecComparisons": codec_comparisons(source, output_dir / "codec-baselines"),
     }
 
 
 def write_report(records: list[Dict[str, Any]], pending: list[Dict[str, str]], output_path: Path) -> None:
-    payload = {"benchmarkVersion": "0.2.0", "codecBaselines": codec_baselines(), "records": records, "pendingInputCategories": pending}
+    payload = {"benchmarkVersion": "0.4.0", "codecBaselines": codec_baselines(), "records": records, "pendingInputCategories": pending}
     (output_path / "benchmark-report.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    lines = ["# Relational Representation Benchmark", "", "| Category | Provenance | Pixels | Entities | Edges | PSNR | SSIM | Runtime |", "|---|---|---:|---:|---:|---:|---:|---:|"]
+    lines = ["# Relational Representation Benchmark", "", "| Category | Provenance | Pixels | Entities | Edges | Constant PSNR | Model PSNR | Residual PSNR | Runtime |", "|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     for record in records:
         quality = record["quality"]
-        lines.append(f"| {record['category']} | {record['provenance']} | {record['pixels']} | {sum(record['entityCountByLevel'].values())} | {record['relationshipCount']} | {quality['psnr']:.2f} | {quality['ssim']:.4f} | {quality['processingTimeMs']:.1f} ms |")
-    lines += ["", "## Pending user-supplied categories", ""] + [f"- `{item['category']}`: {item['reason']}" for item in pending]
+        modes = record["reconstructionModes"]
+        lines.append(f"| {record['category']} | {record['provenance']} | {record['pixels']} | {sum(record['entityCountByLevel'].values())} | {record['relationshipCount']} | {modes['constant']['psnr']:.2f} | {modes['parametric']['psnr']:.2f} | {modes['residual']['psnr']:.2f} | {quality['processingTimeMs']:.1f} ms |")
+    lines += ["", "The report records the three deterministic reconstruction modes, rate-distortion metadata, and server-side SLIC/watershed/Felzenszwalb diagnostics for every fixture.", "", "## Pending user-supplied categories", ""] + [f"- `{item['category']}`: {item['reason']}" for item in pending]
     lines += ["", "This benchmark reports measurements; it does not claim superiority over image codecs or vectorizers."]
     (output_path / "benchmark-report.md").write_text("\n".join(lines), encoding="utf-8")
 

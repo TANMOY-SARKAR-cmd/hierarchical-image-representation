@@ -1,63 +1,81 @@
 # Relational Entity Representation Schema
 
-## Version 0.3.0
+## Version 0.4.0
 
-Version **0.3.0** replaces arbitrary fixed-size parent grouping with deterministic, connectivity-constrained graph agglomeration. Exports retain the v0.2 artifact locations, and `read_compatible_representation` reads both versions without rewriting historical v0.2 results.
+Version **0.4.0** retains the deterministic, connectivity-constrained graph hierarchy introduced in v0.3 and adds fidelity-oriented, non-semantic reconstruction. A representation now records three separately inspectable outputs: a constant per-region baseline, an adaptive local-Lab reconstruction, and an optional bounded residual reconstruction. It also records the selected segmentation strategy and can report comparable server-side segmentation diagnostics for SLIC, watershed, and Felzenszwalb baselines.
+
+> The system encodes measured image structure only. It does not use semantic classification, identity recognition, generative synthesis, or client-side image processing.
 
 | Layer | Primary record | Storage rule |
 |---|---|---|
-| Image | Dimensions, source bytes, experiment metadata | JSON |
-| Pixel feature field | Dense `H × W × F` tensor | `features.npz` |
-| Micro-region | Canonical mask-derived entity | JSON plus integer label field |
-| Higher entity | Child IDs, sufficient statistics, union geometry | JSON; no duplicated pixel-coordinate lists |
+| Image | Dimensions, source bytes, experiment metadata, resolved configuration | JSON |
+| Pixel feature field | Dense `H × W × F` tensor and `pixelToMicroregion` labels | `features.npz` |
+| Micro-region | Canonical mask geometry, sufficient statistics, local appearance model | JSON plus label field |
+| Higher entity | Child IDs, union geometry, derived statistics | JSON; no copied pixel-coordinate lists |
 | Relationship graph | Sparse same-level, containment, and cross-resolution records | JSON |
+| Quantized residual field | Bounded reconstruction detail after adaptive local models | `residuals.npz` |
 
-## Pixel Feature Field
+## Feature, Entity, and Relationship Contracts
 
-`PixelVector@0.3` groups features into geometry, appearance, and local structure. It includes RGB, lightness, HSV, normalized Lab, gradient components and orientation, edge strength, local variance, entropy, and complexity. Coordinates are normalized by image dimensions. Positive local fields use robust median/MAD normalization; edge density and entropy remain bounded unit measures.
+`PixelVector@0.4` groups deterministic geometry, RGB/HSV/Lab appearance, gradients, edge strength, local variance, entropy, and complexity. Pixel coordinates are normalized by image dimensions. Positive local fields use robust median/MAD normalization, while edge density and entropy remain bounded measurements.
 
-## Entity Model
+Every entity recomputes geometry from its binary mask: bounding box, centroid, area, perimeter, compactness, orientation, and Hu descriptors. Higher entities reference child IDs rather than duplicating member pixels. `EntityVector@0.4` preserves structured geometry, appearance, local structure, and shape sections together with a flattened numerical vector.
 
-Every entity recomputes canonical geometry from its current binary mask: bounding box, centroid, area, perimeter, compactness, and orientation. Sufficient statistics retain count, sum, and sum of squares for the primary fields. `EntityVector@0.3` contains structured geometry, appearance, structure, and Hu-moment shape sections plus a flattened numerical vector.
+Candidate graph edges are drawn from adjacency, spatial K-nearest neighbours, and appearance K-nearest neighbours. Same-level records retain normalized distance, directional displacement, colour and texture similarity, boundary contact, confidence, and merge affinity. Parent-child containment and Hungarian cross-resolution links remain explicit relationship records.
 
-> Leaf membership is retained only as `pixelToMicroregion` in the NPZ artifact. Higher entities reference children; they do not copy member-pixel lists.
+## Adaptive Reconstruction
 
-## Relationship Model
+Each micro-region evaluates the configured constant, affine, and quadratic local appearance candidates in CIE Lab space. The engine selects one deterministically using a penalized objective that balances colour fit, parameter count, and boundary leakage. The selected `AppearanceModel@0.4` is stored on the entity as `appearanceModel`, including its model kind, parameter count, Lab MSE, selection score, and boundary-leakage measure.
 
-Candidate edges are the union of region adjacency, spatial K-nearest neighbours, and appearance K-nearest neighbours. `candidateSources` preserves why every edge exists. Same-level records include normalized distance, directional displacement, log area and brightness ratios, normalized Lab distance, texture and shape similarity, boundary contact, confidence, and `mergeAffinity`.
+| Output mode | Artifact | Meaning | Intended comparison |
+|---|---|---|---|
+| `constant` | `reconstructions/constant.png` | Constant colour per micro-region | Stable fidelity baseline |
+| `parametric` | `reconstructions/parametric.png` | Selected constant/affine/quadratic Lab models | Improvement from local appearance structure |
+| `residual` | `reconstructions/residual.png` | Parametric result plus bounded quantized residual | Final fidelity under a defined detail budget |
+| `full` | `reconstructions/full.png` | Canonical full reconstruction alias | Compatible full-output inspection |
 
-`normalizedDistance = distance / image_diagonal`; `logAreaRatio = log((sourceArea + ε) / (targetArea + ε))`; and `logBrightnessRatio = log((sourceBrightness + ε) / (targetBrightness + ε))`. Parent-to-child records are explicit `contains` edges. Cross-resolution correspondence uses minimum-cost matching over IoU, normalized centroid distance, appearance difference, and log-area difference.
+The residual stage is optional, deterministic, and budget-bounded. Quantization step, requested budget, achieved coverage, estimated bytes, and rate-distortion score are captured in `reconstruction_metadata.residual` and `reconstruction_metadata.rateDistortion`. The residual artifact never changes the topology, geometry, hierarchy, or relationship graph.
 
-## Hierarchy, Reconstruction, and Scope
+## Segmentation and Diagnostics
 
-The hierarchy is `pixel → micro_region → region → composite → entity → image`. A merge is allowed only when its candidate pair is adjacent, sufficiently affine, below the size bound, and forms a connected mask union. The export records leaf coverage, parent-area conservation, connectivity, cycle count, and duplicate-storage status.
+The configured primary segmentation strategy is recorded in the resolved configuration. Native analyses can use `slic`, `watershed`, or `felzenszwalb`; all label fields are relabelled and small regions are deterministically merged before graph construction. When `compareSegmentationBaselines` is enabled, `segmentationDiagnostics` records server-computed summaries for each strategy, including requested segment count, actual entity count, and mean boundary edge strength.
 
-The v0.3 reconstruction remains a constant appearance model with progressive level PNGs, error maps, PSNR, SSIM, MSE, and artifact sizes. Transform stacks, affine/quadratic fields, residual coding, Bézier geometry, learned grouping, and semantic hypotheses are intentionally deferred until structural validity has been evaluated.
+| Configuration field | Default | Effect |
+|---|---:|---|
+| `segmentationStrategy` | `slic` | Selects the primary deterministic partitioning method |
+| `reconstructionProfile` | `balanced` | Sets a named fidelity/resource profile for the run |
+| `appearanceModelCandidates` | constant, affine, quadratic | Limits eligible local-Lab model families |
+| `modelPenalty` | `0.00045` | Penalizes unnecessary appearance-model parameters |
+| `boundaryLeakagePenalty` | `0.00015` | Penalizes fit that leaks across region boundaries |
+| `residualEnabled` | `true` | Enables bounded quantized residual detail |
+| `residualQuantization` | `4` | Sets residual quantization step |
+| `residualBudgetBytes` | `196608` | Caps residual-detail storage |
+| `rateDistortionLambda` | `0.0015` | Weighs rate against distortion in mode scoring |
 
-## v0.2 to v0.3 Migration
+## Artifacts and Error Inspection
 
-| v0.2 field or behavior | v0.3 replacement | Compatibility treatment |
-|---|---|---|
-| `RegionVector@0.2` | Structured `EntityVector@0.3` plus flattened values | Reader accepts both; new analyses emit v0.3 only |
-| `memberPixels` on each entity | Dense `pixelToMicroregion` plus child references | Removed from v0.3 entities to avoid duplicate storage |
-| Fixed groups of three | Connectivity-constrained graph agglomeration | Superseded for new analyses |
-| Nearest-centroid scale link | IoU/centroid/appearance/area cost assignment | Replaced for native micro-region correspondence |
-| `scaleFactor` terminology | `resolutionFactor` plus retained `scaleFactor` alias | Alias retained for client compatibility |
+The v0.4 bundle retains `representation.json`, `features.npz`, `reconstructed.png`, and `reconstruction.svg` and adds `residuals.npz`. It also exports progressive levels, the three reconstruction modes, and error maps that distinguish constant-baseline error, parametric error, per-region error, and residual energy.
+
+| Artifact family | Paths |
+|---|---|
+| Reconstructions | `reconstructions/level1.png` through `level4.png`, `full.png`, `constant.png`, `parametric.png`, `residual.png` |
+| Error maps | `errors/absolute-error.png`, `parametric-error.png`, `per-region-error.png`, `residual-energy.png` |
+| Overlays | Brightness, gradients, edge strength, complexity, sparse relationship graph, normalized-distance graph, residual energy |
 
 ## Formula Definitions
 
-For source entity `i` and target entity `j`, the normalized spatial distance is
+For source entity `i` and target entity `j`, the normalized spatial distance is `d′(i,j) = ||cᵢ - cⱼ|| / diagonal(image)`. The directed area relation is `logAreaRatio(i,j) = log((Aᵢ + ε) / (Aⱼ + ε))`.
 
-`d′(i,j) = ||cᵢ - cⱼ|| / diagonal(image)`.
+Cross-resolution matching minimizes `C(i,j) = 0.45(1 − IoU) + 0.20Dcentroid + 0.20Dappearance + 0.15DlogArea`. Matches with `C > 0.72` are rejected, and retained correspondence confidence is `1 − C`.
 
-The directed area relation is
+For a reconstruction mode `m`, the stored rate-distortion score is `RD(m) = distortion(m) + λ × normalizedRate(m)`. This score supports transparent comparison among constant, parametric, and residual outputs; it is not a semantic quality judgment.
 
-`logAreaRatio(i,j) = log((Aᵢ + ε) / (Aⱼ + ε))`.
+## Compatibility
 
-The merge affinity combines configured spatial, appearance, brightness, texture, gradient, shape, and boundary terms. Higher edge density and local complexity lower the final merge score. A candidate is only merged if it is adjacent, exceeds the configured threshold, remains below the configured area bound, and yields one connected union mask.
+`read_compatible_representation` accepts v0.2.0, v0.3.0, and v0.4.0 artifacts without mutating historical results. New analyses emit v0.4.0. Consumers should treat `appearanceModel`, `segmentationDiagnostics`, `reconstruction_metadata.rateDistortion`, and `residuals.npz` as v0.4 additions, while preserving the v0.3 hierarchy and relationship fields for compatible inspection.
 
-Cross-resolution matching minimizes
+## Privacy, Limitations, and Deferred Work
 
-`C(i,j) = 0.45(1 − IoU) + 0.20Dcentroid + 0.20Dappearance + 0.15DlogArea`.
+The user-supplied visual acceptance fixtures are private evaluation material. They remain outside version control and are not used for semantic inference, training, classification, identity processing, or generated content. The engine analyses only the pixels supplied to a server-side run and writes its inspectable artifacts for that run.
 
-Matches with `C > 0.72` are rejected. Retained correspondence confidence is `1 − C`.
+This version improves visual fidelity through deterministic local appearance fitting and bounded residual coding, not through semantic priors. Learned segmentation, neural reconstruction, object recognition, face recognition, identity-based generation, and stochastic or generative reconstruction remain intentionally out of scope. Rate-distortion scores compare the recorded deterministic modes under the selected configuration; they do not establish a universal visual-quality ranking across unrelated inputs or configurations.

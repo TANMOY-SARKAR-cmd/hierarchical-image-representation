@@ -16,6 +16,7 @@ const baseInput = {
     maxFileSizeBytes: 1024 * 1024,
     maxImagePixels: 786432,
     groupingMethod: "slic" as const,
+    segmentationStrategy: "slic" as const,
     hierarchyMethod: "graph_agglomerative" as const,
     scaleLevels: [1, 2, 4, 8],
     slicSegments: 72,
@@ -29,6 +30,15 @@ const baseInput = {
     edgeBarrierThreshold: 0.70,
     maxEntityAreaFraction: 0.72,
     complexityMergePenalty: 0.35,
+    reconstructionProfile: "balanced" as const,
+    appearanceModelCandidates: ["constant", "affine", "quadratic"] as const,
+    modelPenalty: 0.00045,
+    boundaryLeakagePenalty: 0.00015,
+    residualEnabled: true,
+    residualQuantization: 4,
+    residualBudgetBytes: 196608,
+    rateDistortionLambda: 0.0015,
+    compareSegmentationBaselines: false,
   },
 };
 
