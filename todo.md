@@ -41,7 +41,7 @@
 - [x] Exercise graph-edge type, adjacency, confidence, distance, and reset controls in a browser-like UI test.
 - [x] Capture a narrow mobile screenshot of the updated graph-edge filtering controls.
 - [x] Review pasted_content.txt and translate its new requirements into specific implementation tasks.
-- [ ] Implement, validate, checkpoint, and synchronize the new pasted_content.txt requirements in the separate project.
+- [x] Implement, validate, checkpoint, and synchronize the pasted_content.txt **prioritized v0.3 structural refactor** in the separate project; document transform, adaptive reconstruction, rate-distortion, vectorization, and semantic phases as deferred research work.
 - [x] Introduce schema v0.3 with a v0.2 compatibility reader, experiment metadata, and reproducible configuration hashing.
 - [x] Split the scientific engine into focused modules while preserving the server-spawned Python contract.
 - [x] Add structured pixel and entity feature schemas, robust feature normalization, Lab color features, gradient orientation, Hu descriptors, and sufficient statistics.
