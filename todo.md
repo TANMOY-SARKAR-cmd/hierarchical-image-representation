@@ -1,0 +1,22 @@
+# Project TODO
+
+- [x] Define versioned representation, entity, hierarchy, relationship, and metrics contracts that use the exact required field names.
+- [x] Add configurable upload validation for PNG, JPEG, and WebP images with server-side maximum-file-size enforcement.
+- [x] Implement the Python analysis engine with NumPy, OpenCV, and scikit-image feature extraction.
+- [x] Invoke the Python engine only from the Node server through a child-process bridge with structured JSON input/output.
+- [x] Implement deterministic SLIC superpixel segmentation with tiny-region cleanup and a pluggable grouping interface.
+- [x] Aggregate region entities with required geometry, appearance, and complete member-pixel coordinates.
+- [x] Build the all-pairs region relationship graph with required distance, angle, ratio, adjacency, overlap, and containment fields.
+- [x] Implement configurable 1×, 2×, 4×, and 8× multi-scale processing with parent-child entity links.
+- [x] Produce the four-level pixel, microregion, region, part, and object-candidate hierarchy using deterministic grouping.
+- [x] Generate reconstructed PNG and SVG region-boundary outputs with PSNR, SSIM, MSE, compression ratio, and processing-time metrics.
+- [x] Expose typed processing, artifact, entity, hierarchy, and relationship procedures through the application server.
+- [x] Build the dark high-contrast scientific workbench UI with upload, comparison, overlays, hierarchy browser, entity detail, metrics, and export controls.
+- [x] Add unit and integration tests for analysis contracts, deterministic processing, API validation, exports, and UI states.
+- [x] Document the architecture, configuration, local setup, supported limits, and known prototype limitations.
+- [x] Verify the app with static checks, automated tests, a production build, and desktop/mobile screenshots.
+- [ ] Create a final checkpoint for the separate project and provide the project version to the user.
+- [x] Compute containment direction from masks and validate overlap/containment records with a targeted unit test.
+- [x] Record dense pixel-to-microregion membership as a first-class hierarchy artifact and verify its contract.
+- [x] Add typed entity, hierarchy, relationship, and artifact retrieval procedures backed by a completed analysis result.
+- [x] Add an automated browser-like UI test for the workbench’s initial and upload-ready states.
