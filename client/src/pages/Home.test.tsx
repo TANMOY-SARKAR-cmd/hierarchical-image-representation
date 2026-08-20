@@ -1,30 +1,47 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const processMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     imageAnalysis: {
-      process: {
-        useMutation: () => ({ isPending: false, mutateAsync: vi.fn() }),
-      },
+      process: { useMutation: () => processMutation },
     },
   },
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-import Home from "./Home";
+import Home, { filterRelationships } from "./Home";
+
+const baseRelationship = { sourceId: "micro-1", targetId: "micro-2", distance: 8, angle: 0, sizeRatio: 1, colorDistance: 2, colorSimilarity: 0.95, shapeSimilarity: 0.9, textureSimilarity: 0.8, brightnessDifference: 0.02, brightnessRatio: 1.02, normalizedDx: 0.05, normalizedDy: 0, boundaryContactRatio: 0.25, containmentRatio: 0, overlapRatio: 0, containment: "none" };
+const makeEntity = (id: string, children: string[] = []) => ({ id, type: id === "image-root" ? "image" : "micro_region", level: id === "image-root" ? 5 : 1, scaleFactor: 1, geometry: { boundingBox: [0, 0, 10, 10], centroid: id === "micro-1" ? [4, 4] : [12, 12], area: 64, perimeter: 32, orientation: 0, compactness: 0.7 }, appearance: { meanRGB: [20, 140, 210], brightness: 0.52, varianceRGB: [1, 1, 1] }, statistics: { memberPixelCount: 64, complexity: 0.4 }, vector: { schema: "RegionVector@0.2", dimension: 20, values: Array.from({ length: 20 }, () => 0), provenance: "pixel_aggregate", aggregation: "mean" }, memberPixels: [], children, parentId: id === "image-root" ? null : "image-root", crossScaleParentId: null });
+const completedResult = {
+  representation: {
+    image: { width: 24, height: 24, sourceBytes: 120 },
+    entities: [makeEntity("image-root", ["micro-1", "micro-2"]), makeEntity("micro-1"), makeEntity("micro-2")],
+    relationships: [
+      { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent", "near"], primaryType: "adjacent", adjacent: true },
+      { ...baseRelationship, targetId: "image-root", normalizedDistance: 0.45, confidence: 0.7, relationshipType: ["similar_color"], primaryType: "similar_color", adjacent: false },
+    ],
+    metrics: { mse: 0, psnr: 99, ssim: 1, processingTimeMs: 10, representationBytes: 100, representationOverhead: 1 },
+    hierarchy: { rootId: "image-root" }, feature_schema: { PixelVector: { fields: [] }, RegionVector: { fields: [], dimension: 20 } }, scales: [], reconstruction_metadata: { outputs: {} }, scale_consistency: { status: "completed" }, profiling: {},
+  },
+  artifactUrls: { representationJson: "/representation.json", featuresNpz: "/features.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: { relationshipGraph: "/relationship.png", normalizedDistanceGraph: "/distance.png" }, reconstructions: { full: "/reconstructed.png" }, errors: {} },
+};
 
 describe("Hierarchy workbench UI", () => {
+  afterEach(() => cleanup());
+
   beforeEach(() => {
-    class TestResizeObserver {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
+    processMutation.mutateAsync.mockReset();
+    class TestResizeObserver { observe() {} unobserve() {} disconnect() {} }
+    class TestFileReader { result = "data:image/png;base64,ZmFrZQ=="; onload: (() => void) | null = null; onerror: (() => void) | null = null; readAsDataURL() { this.onload?.(); } }
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    vi.stubGlobal("FileReader", TestFileReader);
     vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:fixture"), revokeObjectURL: vi.fn() });
   });
 
@@ -35,6 +52,8 @@ describe("Hierarchy workbench UI", () => {
     expect(screen.getByText("NO ENTITY TREE LOADED")).toBeInTheDocument();
     expect(screen.getByText("Complexity heatmap")).toBeInTheDocument();
     expect(screen.getByText("Relationship graph")).toBeInTheDocument();
+    expect(screen.getByText("Graph-edge filters")).toBeInTheDocument();
+    expect(screen.getByText(/narrow sparse graph edges/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "FULL" })).toBeDisabled();
     expect(analysisButton).toBeDisabled();
 
@@ -44,5 +63,36 @@ describe("Hierarchy workbench UI", () => {
 
     expect(screen.getByText("specimen.png")).toBeInTheDocument();
     expect(analysisButton).toBeEnabled();
+  });
+
+  it("filters graph edges by selected type, adjacency, confidence, and distance", () => {
+    const relationships = [
+      { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent", "near"], primaryType: "adjacent", adjacent: true },
+      { ...baseRelationship, targetId: "c", normalizedDistance: 0.42, confidence: 0.76, relationshipType: ["similar_color"], primaryType: "similar_color", adjacent: false },
+      { ...baseRelationship, targetId: "d", normalizedDistance: 0.18, confidence: 0.3, relationshipType: ["near"], primaryType: "near", adjacent: false },
+    ];
+    expect(filterRelationships(relationships, { relationshipTypes: ["near"], adjacentOnly: false, minimumConfidence: 0.5, maximumNormalizedDistance: 0.25 })).toEqual([relationships[0]]);
+    expect(filterRelationships(relationships, { relationshipTypes: [], adjacentOnly: true, minimumConfidence: 0, maximumNormalizedDistance: 1 })).toEqual([relationships[0]]);
+  });
+
+  it("applies interactive edge controls and resets the filtered graph", async () => {
+    processMutation.mutateAsync.mockResolvedValue(completedResult);
+    const view = render(<Home />);
+    fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
+    fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
+    await view.findByRole("button", { name: "adjacent" });
+    expect(view.getByText("2/2")).toBeInTheDocument();
+
+    fireEvent.click(view.getByRole("button", { name: "similar color" }));
+    expect(view.getByText("1/2")).toBeInTheDocument();
+    fireEvent.click(view.getByRole("button", { name: "Relationship graph" }));
+    expect(view.getByLabelText("1 filtered graph edges")).toBeInTheDocument();
+
+    fireEvent.click(view.getByRole("button", { name: "OFF" }));
+    fireEvent.change(view.getByRole("spinbutton", { name: "Minimum confidence" }), { target: { value: "1" } });
+    await waitFor(() => expect(view.getByText(/No graph edges match/i)).toBeInTheDocument());
+    fireEvent.change(view.getByRole("spinbutton", { name: "Maximum normalized distance" }), { target: { value: "0.05" } });
+    fireEvent.click(view.getByRole("button", { name: /reset edge filters/i }));
+    expect(view.getByText("2/2")).toBeInTheDocument();
   });
 });

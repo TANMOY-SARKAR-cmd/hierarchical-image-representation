@@ -64,6 +64,7 @@ type Relationship = {
   overlapRatio: number;
   containment: string;
 };
+type EdgeFilter = { relationshipTypes: string[]; adjacentOnly: boolean; minimumConfidence: number; maximumNormalizedDistance: number };
 type Representation = {
   image: { width: number; height: number; sourceBytes: number };
   entities: Entity[];
@@ -91,6 +92,13 @@ const overlays = [
 ] as const;
 
 const availableScales = [1, 2, 4, 8];
+
+export function filterRelationships(relationships: Relationship[], filters: EdgeFilter) {
+  return relationships.filter(relationship => {
+    const typeMatches = !filters.relationshipTypes.length || relationship.relationshipType.some(type => filters.relationshipTypes.includes(type));
+    return typeMatches && (!filters.adjacentOnly || relationship.adjacent) && relationship.confidence >= filters.minimumConfidence && relationship.normalizedDistance <= filters.maximumNormalizedDistance;
+  });
+}
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -152,6 +160,35 @@ function TreeNode({ entity, entities, selectedId, onSelect, depth = 0 }: { entit
   );
 }
 
+function GraphEdgeOverlay({ image, entities, relationships, distanceMode }: { image: Representation["image"]; entities: Map<string, Entity>; relationships: Relationship[]; distanceMode: boolean }) {
+  if (!relationships.length) return <div role="status" className="pointer-events-none absolute inset-0 grid place-items-center bg-slate-950/55 p-6 text-center"><div className="rounded border border-amber-300/25 bg-slate-950/85 px-3 py-2"><p className="font-mono text-[10px] uppercase tracking-wider text-amber-200">No graph edges match</p><p className="mt-1 text-xs text-slate-300">Relax a type, confidence, adjacency, or distance filter.</p></div></div>;
+  return <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox={`0 0 ${image.width} ${image.height}`} preserveAspectRatio="none" aria-label={`${relationships.length} filtered graph edges`}>
+    {relationships.map(edge => {
+      const source = entities.get(edge.sourceId);
+      const target = entities.get(edge.targetId);
+      if (!source || !target) return null;
+      const color = distanceMode ? `hsl(${Math.round((1 - edge.normalizedDistance) * 135)}, 88%, 58%)` : edge.adjacent ? "#34d399" : "#fbbf24";
+      return <line key={`${edge.sourceId}-${edge.targetId}`} x1={source.geometry.centroid[0]} y1={source.geometry.centroid[1]} x2={target.geometry.centroid[0]} y2={target.geometry.centroid[1]} stroke={color} strokeWidth={Math.max(0.7, edge.confidence * 2)} strokeOpacity={0.3 + edge.confidence * 0.65} />;
+    })}
+  </svg>;
+}
+
+function GraphEdgeFilterPanel({ representation, relationshipTypes, filteredCount, selectedTypes, setSelectedTypes, adjacentOnly, setAdjacentOnly, minimumConfidence, setMinimumConfidence, maximumNormalizedDistance, setMaximumNormalizedDistance }: { representation: Representation | null; relationshipTypes: string[]; filteredCount: number; selectedTypes: string[]; setSelectedTypes: React.Dispatch<React.SetStateAction<string[]>>; adjacentOnly: boolean; setAdjacentOnly: React.Dispatch<React.SetStateAction<boolean>>; minimumConfidence: number; setMinimumConfidence: React.Dispatch<React.SetStateAction<number>>; maximumNormalizedDistance: number; setMaximumNormalizedDistance: React.Dispatch<React.SetStateAction<number>> }) {
+  const reset = () => { setSelectedTypes([]); setAdjacentOnly(false); setMinimumConfidence(0); setMaximumNormalizedDistance(1); };
+  const clamp = (value: string, minimum: number) => Math.max(minimum, Math.min(1, Number(value) || 0));
+  return <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4" aria-labelledby="graph-edge-filter-title">
+    <div className="mb-3 flex items-center justify-between gap-2"><div className="flex items-center gap-2 text-sm font-semibold text-slate-100"><Network className="h-4 w-4 text-cyan-300" /><span id="graph-edge-filter-title">Graph-edge filters</span></div>{representation ? <span className="font-mono text-[10px] text-cyan-200">{filteredCount}/{representation.relationships.length}</span> : null}</div>
+    {representation ? <div className="space-y-4">
+      <div><div className="mb-2 flex items-center justify-between"><Label className="text-xs text-slate-300">Relationship type</Label><span className="font-mono text-[9px] uppercase text-slate-500">{selectedTypes.length ? `${selectedTypes.length} selected` : "all types"}</span></div><div className="flex flex-wrap gap-1.5">{relationshipTypes.map(type => <Button key={type} type="button" variant="outline" size="sm" aria-pressed={selectedTypes.includes(type)} onClick={() => setSelectedTypes(current => current.includes(type) ? current.filter(item => item !== type) : [...current, type])} className={cn("h-7 border-white/10 bg-black/20 px-2 font-mono text-[9px] text-slate-500", selectedTypes.includes(type) && "border-cyan-300/45 bg-cyan-300/10 text-cyan-100")}>{type.replaceAll("_", " ")}</Button>)}</div></div>
+      <div className="flex items-center justify-between rounded border border-white/8 bg-black/20 px-2.5 py-2"><span className="text-xs text-slate-300">Adjacent only</span><Button type="button" variant="outline" size="sm" aria-pressed={adjacentOnly} onClick={() => setAdjacentOnly(value => !value)} className={cn("h-6 border-white/10 bg-transparent px-2 font-mono text-[9px]", adjacentOnly ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : "text-slate-500")}>{adjacentOnly ? "ON" : "OFF"}</Button></div>
+      <div><div className="mb-2 flex items-center justify-between gap-2"><Label className="text-xs text-slate-300">Minimum confidence</Label><Input aria-label="Minimum confidence" type="number" min="0" max="1" step="0.05" value={minimumConfidence} onChange={event => setMinimumConfidence(clamp(event.target.value, 0))} className="h-7 w-16 border-white/10 bg-black/20 px-1.5 text-right font-mono text-xs text-cyan-200" /></div><Slider value={[minimumConfidence]} onValueChange={value => setMinimumConfidence(value[0] ?? 0)} min={0} max={1} step={0.05} /></div>
+      <div><div className="mb-2 flex items-center justify-between gap-2"><Label className="text-xs text-slate-300">Maximum normalized distance</Label><Input aria-label="Maximum normalized distance" type="number" min="0.05" max="1" step="0.05" value={maximumNormalizedDistance} onChange={event => setMaximumNormalizedDistance(clamp(event.target.value, 0.05))} className="h-7 w-16 border-white/10 bg-black/20 px-1.5 text-right font-mono text-xs text-cyan-200" /></div><Slider value={[maximumNormalizedDistance]} onValueChange={value => setMaximumNormalizedDistance(value[0] ?? 1)} min={0.05} max={1} step={0.05} /></div>
+      {filteredCount === 0 ? <p className="rounded border border-amber-300/20 bg-amber-300/[0.04] p-2 text-xs text-amber-100">No edges match the active filters. Reset or relax a threshold to restore graph and inspector edges.</p> : null}
+      <Button type="button" variant="outline" size="sm" onClick={reset} className="h-8 w-full border-white/10 bg-black/20 font-mono text-[10px] text-slate-400 hover:bg-white/5">Reset edge filters</Button>
+    </div> : <p className="rounded border border-dashed border-white/10 p-3 text-xs leading-relaxed text-slate-500">Run an analysis to narrow sparse graph edges by relationship type, adjacency, confidence, or normalized distance.</p>}
+  </section>;
+}
+
 /**
  * All content in this page are only for example, replace with your own feature implementation
  * When building pages, remember your instructions in Frontend Workflow, Frontend Best Practices, Design Guide and Common Pitfalls
@@ -168,16 +205,23 @@ export default function Home() {
   const [slicSegments, setSlicSegments] = useState(72);
   const [compactness, setCompactness] = useState(10);
   const [reconstructionLevel, setReconstructionLevel] = useState<"level1" | "level2" | "level3" | "level4" | "full">("full");
+  const [selectedRelationshipTypes, setSelectedRelationshipTypes] = useState<string[]>([]);
+  const [adjacentOnly, setAdjacentOnly] = useState(false);
+  const [minimumConfidence, setMinimumConfidence] = useState(0);
+  const [maximumNormalizedDistance, setMaximumNormalizedDistance] = useState(1);
   const processMutation = trpc.imageAnalysis.process.useMutation();
 
   const entities = useMemo(() => new Map((representation?.entities ?? []).map(entity => [entity.id, entity])), [representation]);
   const selectedEntity = selectedId ? entities.get(selectedId) ?? null : null;
+  const relationshipTypes = useMemo(() => Array.from(new Set((representation?.relationships ?? []).flatMap(relationship => relationship.relationshipType))).sort(), [representation]);
+  const filteredRelationships = useMemo(() => filterRelationships(representation?.relationships ?? [], { relationshipTypes: selectedRelationshipTypes, adjacentOnly, minimumConfidence, maximumNormalizedDistance }), [representation, selectedRelationshipTypes, adjacentOnly, minimumConfidence, maximumNormalizedDistance]);
   const entityRelationships = useMemo(
-    () => (representation?.relationships ?? []).filter(relationship => relationship.sourceId === selectedId || relationship.targetId === selectedId),
-    [representation, selectedId]
+    () => filteredRelationships.filter(relationship => relationship.sourceId === selectedId || relationship.targetId === selectedId),
+    [filteredRelationships, selectedId]
   );
   const root = representation ? entities.get(representation.hierarchy.rootId) ?? null : null;
-  const overlayUrl = selectedOverlay === "none" ? null : selectedOverlay === "absolutePixelError" ? artifacts?.errors.absolutePixelError ?? null : selectedOverlay === "perRegionError" ? artifacts?.errors.perRegionError ?? null : artifacts?.overlays[selectedOverlay] ?? null;
+  const relationshipOverlayActive = selectedOverlay === "relationshipGraph" || selectedOverlay === "normalizedDistanceGraph";
+  const overlayUrl = selectedOverlay === "none" || relationshipOverlayActive ? null : selectedOverlay === "absolutePixelError" ? artifacts?.errors.absolutePixelError ?? null : selectedOverlay === "perRegionError" ? artifacts?.errors.perRegionError ?? null : artifacts?.overlays[selectedOverlay] ?? null;
   const reconstructionUrl = artifacts?.reconstructions[reconstructionLevel] ?? artifacts?.reconstructedPng ?? null;
   const parentChain = useMemo(() => {
     const chain: Entity[] = [];
@@ -206,6 +250,10 @@ export default function Home() {
     setRepresentation(null);
     setArtifacts(null);
     setSelectedId(null);
+    setSelectedRelationshipTypes([]);
+    setAdjacentOnly(false);
+    setMinimumConfidence(0);
+    setMaximumNormalizedDistance(1);
     setSourceUrl(URL.createObjectURL(incoming));
   }
 
@@ -240,6 +288,10 @@ export default function Home() {
       setRepresentation(parsed);
       setArtifacts(result.artifactUrls);
       setSelectedId(parsed.entities.find(entity => entity.type === "micro_region")?.id ?? parsed.hierarchy.rootId);
+      setSelectedRelationshipTypes([]);
+      setAdjacentOnly(false);
+      setMinimumConfidence(0);
+      setMaximumNormalizedDistance(1);
       toast.success("Relational multi-scale analysis completed.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The analysis could not be completed.");
@@ -316,13 +368,14 @@ export default function Home() {
               {overlays.map(overlay => <button type="button" key={overlay.id} onClick={() => setSelectedOverlay(overlay.id)} disabled={overlay.id !== "none" && !artifacts} className={cn("flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs transition-colors", selectedOverlay === overlay.id ? "bg-cyan-300/10 text-cyan-100" : "text-slate-400 hover:bg-white/5 hover:text-slate-200", !artifacts && overlay.id !== "none" && "cursor-not-allowed opacity-40")}><span>{overlay.label}</span>{selectedOverlay === overlay.id ? <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" /> : null}</button>)}
             </div>
           </section>
+          <GraphEdgeFilterPanel representation={representation} relationshipTypes={relationshipTypes} filteredCount={filteredRelationships.length} selectedTypes={selectedRelationshipTypes} setSelectedTypes={setSelectedRelationshipTypes} adjacentOnly={adjacentOnly} setAdjacentOnly={setAdjacentOnly} minimumConfidence={minimumConfidence} setMinimumConfidence={setMinimumConfidence} maximumNormalizedDistance={maximumNormalizedDistance} setMaximumNormalizedDistance={setMaximumNormalizedDistance} />
         </aside>
 
         <section className="min-w-0 space-y-4">
           <section className="overflow-hidden rounded-xl border border-cyan-100/10 bg-slate-900/80 shadow-2xl shadow-slate-950/20">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-4 py-3"><div><h2 className="text-sm font-semibold text-slate-100">Comparative reconstruction</h2><p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">Source · feature field · hierarchical decoding</p></div><div className="flex flex-wrap items-center gap-1"><div className="mr-1 hidden font-mono text-[9px] uppercase tracking-wider text-slate-600 sm:block">decode</div>{(["level1", "level2", "level3", "level4", "full"] as const).map(level => <Button key={level} type="button" variant="outline" size="sm" disabled={!artifacts} onClick={() => setReconstructionLevel(level)} className={cn("h-7 border-white/10 bg-black/20 px-2 font-mono text-[9px] text-slate-500", reconstructionLevel === level && "border-emerald-300/40 bg-emerald-300/10 text-emerald-100")}>{level === "full" ? "FULL" : level.toUpperCase()}</Button>)}<div className="ml-1 rounded border border-white/10 bg-black/20 px-2 py-1 font-mono text-[10px] text-slate-400">{representation ? `${representation.image.width} × ${representation.image.height}` : "WAITING"}</div></div></div>
             <div className="grid gap-px bg-white/10 md:grid-cols-2">
-              <div className="relative min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Original / overlay</span><span className="text-cyan-300">{selectedOverlay === "none" ? "RGB" : selectedOverlay}</span></div>{sourceUrl ? <div className="relative overflow-hidden rounded border border-white/8 bg-black"><img src={sourceUrl} alt="Uploaded source" className="max-h-[480px] w-full object-contain" />{overlayUrl ? <img src={overlayUrl} alt="Selected feature overlay" className="absolute inset-0 h-full w-full object-contain opacity-60 mix-blend-screen" /> : null}</div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-cyan-300/15 bg-[linear-gradient(rgba(34,211,238,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.035)_1px,transparent_1px)] bg-[size:24px_24px] text-center"><div className="absolute inset-6 rounded-[38%_62%_55%_45%/45%_38%_62%_55%] border border-cyan-300/10" /><div className="absolute inset-16 rounded-[46%_54%_35%_65%/60%_42%_58%_40%] border border-violet-300/10" /><div className="relative"><Boxes className="mx-auto mb-3 h-8 w-8 text-cyan-500/60" /><p className="text-sm font-medium text-slate-400">Load an image to sample feature fields.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">RGB → gradients → microregions</p></div></div>}</div>
+              <div className="relative min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Original / overlay</span><span className="text-cyan-300">{selectedOverlay === "none" ? "RGB" : selectedOverlay}</span></div>{sourceUrl ? <div className="relative overflow-hidden rounded border border-white/8 bg-black"><img src={sourceUrl} alt="Uploaded source" className="max-h-[480px] w-full object-contain" />{relationshipOverlayActive && representation ? <><GraphEdgeOverlay image={representation.image} entities={entities} relationships={filteredRelationships} distanceMode={selectedOverlay === "normalizedDistanceGraph"} /><div className="absolute bottom-2 left-2 rounded border border-cyan-300/25 bg-slate-950/80 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-cyan-100">{filteredRelationships.length} filtered edges</div></> : overlayUrl ? <img src={overlayUrl} alt="Selected feature overlay" className="absolute inset-0 h-full w-full object-contain opacity-60 mix-blend-screen" /> : null}</div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-cyan-300/15 bg-[linear-gradient(rgba(34,211,238,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.035)_1px,transparent_1px)] bg-[size:24px_24px] text-center"><div className="absolute inset-6 rounded-[38%_62%_55%_45%/45%_38%_62%_55%] border border-cyan-300/10" /><div className="absolute inset-16 rounded-[46%_54%_35%_65%/60%_42%_58%_40%] border border-violet-300/10" /><div className="relative"><Boxes className="mx-auto mb-3 h-8 w-8 text-cyan-500/60" /><p className="text-sm font-medium text-slate-400">Load an image to sample feature fields.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">RGB → gradients → microregions</p></div></div>}</div>
               <div className="min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Reconstructed output</span><span className="text-emerald-300">{reconstructionLevel === "full" ? "MICRO-REGION MEAN" : reconstructionLevel.toUpperCase()}</span></div>{reconstructionUrl ? <div className="overflow-hidden rounded border border-white/8 bg-black"><img src={reconstructionUrl} alt="Hierarchically reconstructed image" className="max-h-[480px] w-full object-contain" /></div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-emerald-300/15 bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.07),transparent_42%)] text-center"><div className="absolute grid h-32 w-44 grid-cols-4 gap-1 opacity-35">{Array.from({ length: 16 }).map((_, index) => <span key={index} className="rounded-sm border border-emerald-300/30" style={{ transform: `translate(${(index % 3) - 1}px, ${Math.floor(index / 4) % 2 ? 2 : -2}px)` }} />)}</div><div className="relative"><Network className="mx-auto mb-3 h-8 w-8 text-emerald-500/60" /><p className="text-sm font-medium text-slate-400">Decode a region hierarchy to inspect fidelity.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">Regions → mean appearance → PNG / SVG</p></div></div>}</div>
             </div>
           </section>
