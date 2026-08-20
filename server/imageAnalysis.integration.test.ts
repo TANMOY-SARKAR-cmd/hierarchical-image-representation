@@ -46,15 +46,15 @@ describe("Node-to-Python image analysis integration", () => {
     expect(representation.relationships.length).toBeGreaterThan(0);
     expect(representation.metrics.ssim).toBeGreaterThanOrEqual(0);
     expect(representation.metrics.processingTimeMs).toBeGreaterThan(0);
-    expect(uploadedArtifacts).toHaveLength(8);
+    expect(uploadedArtifacts).toHaveLength(18);
 
     const jsonArtifact = uploadedArtifacts.find(item => item.contentType === "application/json");
     const npzArtifact = uploadedArtifacts.find(item => item.contentType === "application/octet-stream");
     const pngArtifacts = uploadedArtifacts.filter(item => item.contentType === "image/png");
     const svgArtifact = uploadedArtifacts.find(item => item.contentType === "image/svg+xml");
-    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ version: "1.0.0" });
+    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ representation_version: "0.2.0" });
     expect(npzArtifact?.data.subarray(0, 4).toString("latin1")).toBe("PK\u0003\u0004");
-    expect(pngArtifacts).toHaveLength(5);
+    expect(pngArtifacts).toHaveLength(15);
     expect(pngArtifacts.every(item => item.data.subarray(1, 4).toString("ascii") === "PNG")).toBe(true);
     expect(svgArtifact?.data.toString("utf8").trimStart()).toMatch(/^<svg/);
   }, 120_000);

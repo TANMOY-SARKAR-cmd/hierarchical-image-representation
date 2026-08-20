@@ -14,6 +14,8 @@ export type AnalysisConfig = {
   slicCompactness: number;
   minimumRegionPixels: number;
   hierarchyGroupSize: number;
+  runScaleConsistency: boolean;
+  maxConsistencyPixels: number;
 };
 
 export type AnalysisArtifactUrls = {
@@ -22,6 +24,8 @@ export type AnalysisArtifactUrls = {
   reconstructedPng: string;
   svg: string;
   overlays: Record<string, string>;
+  reconstructions: Record<string, string>;
+  errors: Record<string, string>;
 };
 
 export type AnalysisResult = {
@@ -43,7 +47,7 @@ function safeName(fileName: string) {
 }
 
 function runPython(inputPath: string, outputPath: string, config: AnalysisConfig) {
-  const scriptPath = path.join(process.cwd(), "python_engine", "analysis_engine.py");
+  const scriptPath = path.join(process.cwd(), "python_engine", "representation_engine_v2.py");
   const python = process.env.PYTHON_EXECUTABLE ?? "python3";
   return new Promise<void>((resolve, reject) => {
     const processHandle = spawn(python, [scriptPath, "--input", inputPath, "--output", outputPath, "--config", JSON.stringify(config)], {
@@ -122,6 +126,20 @@ export async function analyzeImage(input: {
       edgeStrength: await uploadArtifact(jobId, outputPath, "overlays/edge-strength.png", "image/png"),
       gradientX: await uploadArtifact(jobId, outputPath, "overlays/gradient-x.png", "image/png"),
       gradientY: await uploadArtifact(jobId, outputPath, "overlays/gradient-y.png", "image/png"),
+      complexity: await uploadArtifact(jobId, outputPath, "overlays/complexity.png", "image/png"),
+      relationshipGraph: await uploadArtifact(jobId, outputPath, "overlays/relationship-graph.png", "image/png"),
+      normalizedDistanceGraph: await uploadArtifact(jobId, outputPath, "overlays/normalized-distance-graph.png", "image/png"),
+    };
+    const reconstructions = {
+      level1: await uploadArtifact(jobId, outputPath, "reconstructions/level1.png", "image/png"),
+      level2: await uploadArtifact(jobId, outputPath, "reconstructions/level2.png", "image/png"),
+      level3: await uploadArtifact(jobId, outputPath, "reconstructions/level3.png", "image/png"),
+      level4: await uploadArtifact(jobId, outputPath, "reconstructions/level4.png", "image/png"),
+      full: await uploadArtifact(jobId, outputPath, "reconstructions/full.png", "image/png"),
+    };
+    const errors = {
+      absolutePixelError: await uploadArtifact(jobId, outputPath, "errors/absolute-error.png", "image/png"),
+      perRegionError: await uploadArtifact(jobId, outputPath, "errors/per-region-error.png", "image/png"),
     };
     const artifactUrls: AnalysisArtifactUrls = {
       representationJson: await uploadArtifact(jobId, outputPath, "representation.json", "application/json"),
@@ -129,6 +147,8 @@ export async function analyzeImage(input: {
       reconstructedPng: await uploadArtifact(jobId, outputPath, "reconstructed.png", "image/png"),
       svg: await uploadArtifact(jobId, outputPath, "reconstruction.svg", "image/svg+xml"),
       overlays: overlayUrls,
+      reconstructions,
+      errors,
     };
     const result = { jobId, representation, artifactUrls };
     activeResults.set(jobId, result);

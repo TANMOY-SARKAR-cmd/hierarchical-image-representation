@@ -28,6 +28,8 @@ request_path.write_text(
                     "slicCompactness": 8,
                     "minimumRegionPixels": 2,
                     "hierarchyGroupSize": 3,
+                    "runScaleConsistency": True,
+                    "maxConsistencyPixels": 786432,
                 },
             }
         }

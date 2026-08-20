@@ -12,6 +12,8 @@ const analysisConfig = z.object({
   slicCompactness: z.number().min(0.1).max(50).default(10),
   minimumRegionPixels: z.number().int().min(1).max(500).default(12),
   hierarchyGroupSize: z.number().int().min(2).max(8).default(3),
+  runScaleConsistency: z.boolean().default(true),
+  maxConsistencyPixels: z.number().int().min(64 * 64).max(1_500_000).default(786_432),
 });
 
 export const imageAnalysisRouter = router({

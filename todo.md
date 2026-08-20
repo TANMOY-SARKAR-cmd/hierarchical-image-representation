@@ -15,8 +15,21 @@
 - [x] Add unit and integration tests for analysis contracts, deterministic processing, API validation, exports, and UI states.
 - [x] Document the architecture, configuration, local setup, supported limits, and known prototype limitations.
 - [x] Verify the app with static checks, automated tests, a production build, and desktop/mobile screenshots.
-- [ ] Create a final checkpoint for the separate project and provide the project version to the user.
+- [x] Create a final checkpoint for the separate project and provide the project version to the user.
 - [x] Compute containment direction from masks and validate overlap/containment records with a targeted unit test.
 - [x] Record dense pixel-to-microregion membership as a first-class hierarchy artifact and verify its contract.
 - [x] Add typed entity, hierarchy, relationship, and artifact retrieval procedures backed by a completed analysis result.
 - [x] Add an automated browser-like UI test for the workbench’s initial and upload-ready states.
+- [x] Upgrade the dense pixel feature schema with saturation, hue, gradient magnitude, and local variance channels.
+- [x] Add explicit derived region vectors and recursive higher-level aggregate vectors with documented aggregation methods.
+- [x] Replace exhaustive same-level relationship generation with a sparse adjacency, neighborhood, and similarity graph using the extended normalized relationship schema.
+- [x] Use neutral hierarchy terminology: pixel, micro-region, region, composite, entity, and image.
+- [x] Add image-general adaptive segmentation capacity driven by complexity measurements rather than semantic assumptions.
+- [x] Record per-scale segmentation characteristics, reconstruction error, and profiling timings in the versioned representation export.
+- [x] Add level-specific reconstruction outputs plus absolute-error and per-region error artifacts.
+- [x] Implement a multi-scale consistency experiment comparing original and 2× representations with normalized stability metrics.
+- [x] Expand the inspector and visualizations for vectors, relationship metrics, hierarchy context, graph overlays, complexity, and relationship matrices.
+- [x] Add a reproducible benchmark suite and report generation for synthetic and representative image classes, with codec baseline metadata where available.
+- [x] Add automated tests for vector schemas, sparse relationship behavior, recursive aggregation, reconstruction artifacts, and scale consistency.
+- [x] Update architecture and representation documentation with aggregation, normalization, graph-complexity, benchmarking, limitations, and research-next-steps guidance.
+- [ ] Verify the upgraded system, save a final checkpoint, and synchronize the completed implementation to the separate GitHub repository.

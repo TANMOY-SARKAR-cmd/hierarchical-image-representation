@@ -21,6 +21,8 @@ const baseInput = {
     slicCompactness: 10,
     minimumRegionPixels: 12,
     hierarchyGroupSize: 3,
+    runScaleConsistency: true,
+    maxConsistencyPixels: 786432,
   },
 };
 
@@ -35,8 +37,10 @@ describe("imageAnalysis router", () => {
         representationJson: "/manus-storage/result.json",
         featuresNpz: "/manus-storage/features.npz",
         reconstructedPng: "/manus-storage/reconstructed.png",
-        svg: "/manus-storage/reconstruction.svg",
-        overlays: {},
+      svg: "/manus-storage/reconstruction.svg",
+      overlays: {},
+      reconstructions: {},
+      errors: {},
       },
     });
     const caller = imageAnalysisRouter.createCaller({} as never);
@@ -63,7 +67,7 @@ describe("imageAnalysis router", () => {
         entities: [{ id: "root" }, { id: "region-1" }],
         relationships: [{ sourceId: "root", targetId: "region-1" }],
       },
-      artifactUrls: { representationJson: "/result.json", featuresNpz: "/features.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: {} },
+      artifactUrls: { representationJson: "/result.json", featuresNpz: "/features.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: {}, reconstructions: {}, errors: {} },
     };
     vi.mocked(getAnalysisResult).mockReturnValue(completedResult);
     const caller = imageAnalysisRouter.createCaller({} as never);

@@ -32,8 +32,9 @@ type Entity = {
   level: number;
   scaleFactor: number;
   geometry: Geometry;
-  appearance: { meanRGB: number[]; brightness: number; varianceRGB: number[] };
-  statistics: { memberPixelCount: number };
+  appearance: { meanRGB: number[]; brightness: number; varianceRGB: number[]; brightnessVariance?: number; meanGradient?: number; edgeDensity?: number; textureMeasure?: number };
+  statistics: { memberPixelCount: number; complexity?: number; childAreaDistribution?: { min: number; max: number; mean: number; variance: number } };
+  vector: { schema: string; dimension: number; values: number[]; provenance: string; aggregation: string };
   memberPixels: number[][];
   children: string[];
   parentId: string | null;
@@ -46,18 +47,34 @@ type Relationship = {
   normalizedDistance: number;
   angle: number;
   sizeRatio: number;
-  colorDifference: number;
+  colorDistance: number;
+  colorSimilarity: number;
+  shapeSimilarity: number;
+  textureSimilarity: number;
   brightnessDifference: number;
+  brightnessRatio: number;
+  normalizedDx: number;
+  normalizedDy: number;
+  boundaryContactRatio: number;
+  containmentRatio: number;
+  confidence: number;
+  relationshipType: string[];
+  primaryType: string;
   adjacent: boolean;
-  overlap: number;
-  containment: boolean;
+  overlapRatio: number;
+  containment: string;
 };
 type Representation = {
   image: { width: number; height: number; sourceBytes: number };
   entities: Entity[];
   relationships: Relationship[];
-  metrics: { mse: number; psnr: number; ssim: number; compressionRatio: number; processingTimeMs: number; representationBytes: number };
+  metrics: { mse: number; psnr: number; ssim: number; processingTimeMs: number; representationBytes: number; representationOverhead: number };
   hierarchy: { rootId: string };
+  feature_schema: { PixelVector: { fields: string[] }; RegionVector: { fields: string[]; dimension: number } };
+  scales: Array<{ scaleFactor: number; entityCount: number; segmentationCharacteristics: { meanComplexity: number; actualSegments: number }; reconstructionError: { psnr: number; ssim: number } }>;
+  reconstruction_metadata: { outputs: Record<string, { entityCount: number; mse: number; psnr: number; ssim: number }> };
+  scale_consistency: { status: string; centroidStability?: number; sizeRatioStability?: number; brightnessStability?: number; colorStability?: number; relationshipStability?: number };
+  profiling: Record<string, number>;
 };
 
 const overlays = [
@@ -66,6 +83,11 @@ const overlays = [
   { id: "edgeStrength", label: "Edge strength" },
   { id: "gradientX", label: "X gradient" },
   { id: "gradientY", label: "Y gradient" },
+  { id: "complexity", label: "Complexity heatmap" },
+  { id: "relationshipGraph", label: "Relationship graph" },
+  { id: "normalizedDistanceGraph", label: "Normalized distance graph" },
+  { id: "absolutePixelError", label: "Absolute error map" },
+  { id: "perRegionError", label: "Per-region error" },
 ] as const;
 
 const availableScales = [1, 2, 4, 8];
@@ -138,13 +160,14 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [representation, setRepresentation] = useState<Representation | null>(null);
-  const [artifacts, setArtifacts] = useState<{ representationJson: string; featuresNpz: string; reconstructedPng: string; svg: string; overlays: Record<string, string> } | null>(null);
+  const [artifacts, setArtifacts] = useState<{ representationJson: string; featuresNpz: string; reconstructedPng: string; svg: string; overlays: Record<string, string>; reconstructions: Record<string, string>; errors: Record<string, string> } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedOverlay, setSelectedOverlay] = useState<(typeof overlays)[number]["id"]>("none");
   const [scaleLevels, setScaleLevels] = useState<number[]>([1, 2, 4, 8]);
   const [maxFileSizeMb, setMaxFileSizeMb] = useState(8);
   const [slicSegments, setSlicSegments] = useState(72);
   const [compactness, setCompactness] = useState(10);
+  const [reconstructionLevel, setReconstructionLevel] = useState<"level1" | "level2" | "level3" | "level4" | "full">("full");
   const processMutation = trpc.imageAnalysis.process.useMutation();
 
   const entities = useMemo(() => new Map((representation?.entities ?? []).map(entity => [entity.id, entity])), [representation]);
@@ -154,7 +177,15 @@ export default function Home() {
     [representation, selectedId]
   );
   const root = representation ? entities.get(representation.hierarchy.rootId) ?? null : null;
-  const overlayUrl = selectedOverlay === "none" ? null : artifacts?.overlays[selectedOverlay] ?? null;
+  const overlayUrl = selectedOverlay === "none" ? null : selectedOverlay === "absolutePixelError" ? artifacts?.errors.absolutePixelError ?? null : selectedOverlay === "perRegionError" ? artifacts?.errors.perRegionError ?? null : artifacts?.overlays[selectedOverlay] ?? null;
+  const reconstructionUrl = artifacts?.reconstructions[reconstructionLevel] ?? artifacts?.reconstructedPng ?? null;
+  const parentChain = useMemo(() => {
+    const chain: Entity[] = [];
+    let current = selectedEntity?.parentId ? entities.get(selectedEntity.parentId) ?? null : null;
+    while (current) { chain.push(current); current = current.parentId ? entities.get(current.parentId) ?? null : null; }
+    return chain;
+  }, [entities, selectedEntity]);
+  const siblings = useMemo(() => selectedEntity?.parentId ? (entities.get(selectedEntity.parentId)?.children ?? []).filter(id => id !== selectedEntity.id) : [], [entities, selectedEntity]);
 
   useEffect(() => () => {
     if (sourceUrl) URL.revokeObjectURL(sourceUrl);
@@ -201,13 +232,15 @@ export default function Home() {
           slicCompactness: compactness,
           minimumRegionPixels: 12,
           hierarchyGroupSize: 3,
+          runScaleConsistency: true,
+          maxConsistencyPixels: 786432,
         },
       });
       const parsed = result.representation as unknown as Representation;
       setRepresentation(parsed);
       setArtifacts(result.artifactUrls);
-      setSelectedId(parsed.hierarchy.rootId);
-      toast.success("Deterministic region analysis completed.");
+      setSelectedId(parsed.entities.find(entity => entity.type === "micro_region")?.id ?? parsed.hierarchy.rootId);
+      toast.success("Relational multi-scale analysis completed.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The analysis could not be completed.");
     }
@@ -287,10 +320,10 @@ export default function Home() {
 
         <section className="min-w-0 space-y-4">
           <section className="overflow-hidden rounded-xl border border-cyan-100/10 bg-slate-900/80 shadow-2xl shadow-slate-950/20">
-            <div className="flex items-center justify-between border-b border-white/8 px-4 py-3"><div><h2 className="text-sm font-semibold text-slate-100">Comparative reconstruction</h2><p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">Source · feature field · hierarchical decoding</p></div><div className="rounded border border-white/10 bg-black/20 px-2 py-1 font-mono text-[10px] text-slate-400">{representation ? `${representation.image.width} × ${representation.image.height}` : "WAITING FOR INPUT"}</div></div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-4 py-3"><div><h2 className="text-sm font-semibold text-slate-100">Comparative reconstruction</h2><p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">Source · feature field · hierarchical decoding</p></div><div className="flex flex-wrap items-center gap-1"><div className="mr-1 hidden font-mono text-[9px] uppercase tracking-wider text-slate-600 sm:block">decode</div>{(["level1", "level2", "level3", "level4", "full"] as const).map(level => <Button key={level} type="button" variant="outline" size="sm" disabled={!artifacts} onClick={() => setReconstructionLevel(level)} className={cn("h-7 border-white/10 bg-black/20 px-2 font-mono text-[9px] text-slate-500", reconstructionLevel === level && "border-emerald-300/40 bg-emerald-300/10 text-emerald-100")}>{level === "full" ? "FULL" : level.toUpperCase()}</Button>)}<div className="ml-1 rounded border border-white/10 bg-black/20 px-2 py-1 font-mono text-[10px] text-slate-400">{representation ? `${representation.image.width} × ${representation.image.height}` : "WAITING"}</div></div></div>
             <div className="grid gap-px bg-white/10 md:grid-cols-2">
               <div className="relative min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Original / overlay</span><span className="text-cyan-300">{selectedOverlay === "none" ? "RGB" : selectedOverlay}</span></div>{sourceUrl ? <div className="relative overflow-hidden rounded border border-white/8 bg-black"><img src={sourceUrl} alt="Uploaded source" className="max-h-[480px] w-full object-contain" />{overlayUrl ? <img src={overlayUrl} alt="Selected feature overlay" className="absolute inset-0 h-full w-full object-contain opacity-60 mix-blend-screen" /> : null}</div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-cyan-300/15 bg-[linear-gradient(rgba(34,211,238,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.035)_1px,transparent_1px)] bg-[size:24px_24px] text-center"><div className="absolute inset-6 rounded-[38%_62%_55%_45%/45%_38%_62%_55%] border border-cyan-300/10" /><div className="absolute inset-16 rounded-[46%_54%_35%_65%/60%_42%_58%_40%] border border-violet-300/10" /><div className="relative"><Boxes className="mx-auto mb-3 h-8 w-8 text-cyan-500/60" /><p className="text-sm font-medium text-slate-400">Load an image to sample feature fields.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">RGB → gradients → microregions</p></div></div>}</div>
-              <div className="min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Reconstructed output</span><span className="text-emerald-300">REGION MEAN</span></div>{artifacts ? <div className="overflow-hidden rounded border border-white/8 bg-black"><img src={artifacts.reconstructedPng} alt="Hierarchically reconstructed image" className="max-h-[480px] w-full object-contain" /></div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-emerald-300/15 bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.07),transparent_42%)] text-center"><div className="absolute grid h-32 w-44 grid-cols-4 gap-1 opacity-35">{Array.from({ length: 16 }).map((_, index) => <span key={index} className="rounded-sm border border-emerald-300/30" style={{ transform: `translate(${(index % 3) - 1}px, ${Math.floor(index / 4) % 2 ? 2 : -2}px)` }} />)}</div><div className="relative"><Network className="mx-auto mb-3 h-8 w-8 text-emerald-500/60" /><p className="text-sm font-medium text-slate-400">Decode a region hierarchy to inspect fidelity.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">Regions → mean appearance → PNG / SVG</p></div></div>}</div>
+              <div className="min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Reconstructed output</span><span className="text-emerald-300">{reconstructionLevel === "full" ? "MICRO-REGION MEAN" : reconstructionLevel.toUpperCase()}</span></div>{reconstructionUrl ? <div className="overflow-hidden rounded border border-white/8 bg-black"><img src={reconstructionUrl} alt="Hierarchically reconstructed image" className="max-h-[480px] w-full object-contain" /></div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-emerald-300/15 bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.07),transparent_42%)] text-center"><div className="absolute grid h-32 w-44 grid-cols-4 gap-1 opacity-35">{Array.from({ length: 16 }).map((_, index) => <span key={index} className="rounded-sm border border-emerald-300/30" style={{ transform: `translate(${(index % 3) - 1}px, ${Math.floor(index / 4) % 2 ? 2 : -2}px)` }} />)}</div><div className="relative"><Network className="mx-auto mb-3 h-8 w-8 text-emerald-500/60" /><p className="text-sm font-medium text-slate-400">Decode a region hierarchy to inspect fidelity.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">Regions → mean appearance → PNG / SVG</p></div></div>}</div>
             </div>
           </section>
 
@@ -301,8 +334,10 @@ export default function Home() {
         </section>
 
         <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
-          <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Activity className="h-4 w-4 text-cyan-300" /> Quality metrics</div>{representation ? <div className="grid grid-cols-2 gap-2">{[["PSNR", `${representation.metrics.psnr.toFixed(2)} dB`, "cyan"], ["SSIM", representation.metrics.ssim.toFixed(4), "emerald"], ["MSE", representation.metrics.mse.toFixed(2), "amber"], ["Ratio", `${representation.metrics.compressionRatio.toFixed(3)}×`, "violet"], ["Runtime", `${representation.metrics.processingTimeMs.toFixed(0)} ms`, "cyan"], ["Artifact", formatBytes(representation.metrics.representationBytes), "slate"]].map(([label, value, tone]) => <div key={label} className="rounded-md border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500">{label}</p><p className={cn("mt-1 font-mono text-sm font-semibold", tone === "cyan" ? "text-cyan-200" : tone === "emerald" ? "text-emerald-200" : tone === "amber" ? "text-amber-200" : tone === "violet" ? "text-violet-200" : "text-slate-200")}>{value}</p></div>)}</div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Fidelity and artifact metrics appear after region decoding.</p>}</section>
-          <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Boxes className="h-4 w-4 text-cyan-300" /> Entity inspector</div>{selectedEntity ? <div className="space-y-4 text-xs"><div><p className="font-mono text-[10px] uppercase tracking-[0.15em] text-cyan-300">{selectedEntity.type.replace("_", " ")} · L{selectedEntity.level}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-500">{selectedEntity.id}</p></div><div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md border border-white/8 bg-black/20 p-3"><span className="text-slate-500">Bounding box</span><span className="font-mono text-right text-slate-200">[{selectedEntity.geometry.boundingBox.join(", ")}]</span><span className="text-slate-500">Centroid</span><span className="font-mono text-right text-slate-200">({selectedEntity.geometry.centroid.map(value => value.toFixed(1)).join(", ")})</span><span className="text-slate-500">Area</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.area} px</span><span className="text-slate-500">Perimeter</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.perimeter.toFixed(1)}</span><span className="text-slate-500">Orientation</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.orientation.toFixed(1)}°</span><span className="text-slate-500">Mean RGB</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.meanRGB.map(value => value.toFixed(0)).join(", ")}</span><span className="text-slate-500">Brightness</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.brightness.toFixed(3)}</span><span className="text-slate-500">Members</span><span className="font-mono text-right text-slate-200">{selectedEntity.statistics.memberPixelCount}</span></div><div><p className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500">Relationships · {entityRelationships.length}</p><div className="max-h-40 space-y-1 overflow-auto pr-1">{entityRelationships.slice(0, 12).map(relationship => <div key={`${relationship.sourceId}-${relationship.targetId}`} className="rounded border border-white/7 bg-black/15 p-2 font-mono text-[10px] text-slate-400"><span className={relationship.adjacent ? "text-emerald-300" : "text-slate-500"}>{relationship.adjacent ? "ADJ" : "PAIR"}</span> · d {relationship.normalizedDistance.toFixed(3)} · Δc {relationship.colorDifference.toFixed(1)} · θ {relationship.angle.toFixed(1)}°</div>) || <p className="text-slate-600">No base-region relationships.</p>}</div></div></div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Choose an entity in the hierarchy to inspect its exact geometry, appearance, and graph relationships.</p>}</section>
+          <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Activity className="h-4 w-4 text-cyan-300" /> Quality metrics</div>{representation ? <div className="grid grid-cols-2 gap-2">{[["PSNR", `${representation.metrics.psnr.toFixed(2)} dB`, "cyan"], ["SSIM", representation.metrics.ssim.toFixed(4), "emerald"], ["MSE", representation.metrics.mse.toFixed(2), "amber"], ["Overhead", `${representation.metrics.representationOverhead.toFixed(1)}×`, "violet"], ["Runtime", `${representation.metrics.processingTimeMs.toFixed(0)} ms`, "cyan"], ["Artifact", formatBytes(representation.metrics.representationBytes), "slate"]].map(([label, value, tone]) => <div key={label} className="rounded-md border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500">{label}</p><p className={cn("mt-1 font-mono text-sm font-semibold", tone === "cyan" ? "text-cyan-200" : tone === "emerald" ? "text-emerald-200" : tone === "amber" ? "text-amber-200" : tone === "violet" ? "text-violet-200" : "text-slate-200")}>{value}</p></div>)}</div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Fidelity and artifact metrics appear after region decoding.</p>}</section>
+          <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Boxes className="h-4 w-4 text-cyan-300" /> Entity inspector</div>{selectedEntity ? <div className="space-y-4 text-xs"><div><p className="font-mono text-[10px] uppercase tracking-[0.15em] text-cyan-300">{selectedEntity.type.replace("_", " ")} · L{selectedEntity.level}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-500">{selectedEntity.id}</p></div><div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md border border-white/8 bg-black/20 p-3"><span className="text-slate-500">Bounding box</span><span className="font-mono text-right text-slate-200">[{selectedEntity.geometry.boundingBox.join(", ")}]</span><span className="text-slate-500">Centroid</span><span className="font-mono text-right text-slate-200">({selectedEntity.geometry.centroid.map(value => value.toFixed(1)).join(", ")})</span><span className="text-slate-500">Area</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.area} px</span><span className="text-slate-500">Perimeter</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.perimeter.toFixed(1)}</span><span className="text-slate-500">Orientation</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.orientation.toFixed(1)}°</span><span className="text-slate-500">Mean RGB</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.meanRGB.map(value => value.toFixed(0)).join(", ")}</span><span className="text-slate-500">Brightness</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.brightness.toFixed(3)}</span><span className="text-slate-500">Members</span><span className="font-mono text-right text-slate-200">{selectedEntity.statistics.memberPixelCount}</span></div><div><p className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500">Relationships · {entityRelationships.length}</p><div className="max-h-40 space-y-1 overflow-auto pr-1">{entityRelationships.slice(0, 12).map(relationship => <div key={`${relationship.sourceId}-${relationship.targetId}`} className="rounded border border-white/7 bg-black/15 p-2 font-mono text-[10px] text-slate-400"><span className={relationship.adjacent ? "text-emerald-300" : "text-slate-500"}>{relationship.primaryType.toUpperCase()}</span> · d {relationship.normalizedDistance.toFixed(3)} · Δc {relationship.colorDistance.toFixed(1)} · θ {relationship.angle.toFixed(1)}°</div>) || <p className="text-slate-600">No sparse relationships for this entity.</p>}</div></div></div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Choose an entity in the hierarchy to inspect its exact geometry, appearance, vectors, and graph relationships.</p>}</section>
+          <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Network className="h-4 w-4 text-cyan-300" /> Relational context</div>{selectedEntity ? <div className="space-y-3 text-xs"><div className="rounded border border-white/8 bg-black/20 p-3"><div className="flex items-center justify-between"><span className="text-slate-500">Vector</span><span className="font-mono text-cyan-200">{selectedEntity.vector.dimension}D</span></div><p className="mt-1 font-mono text-[10px] text-slate-500">{selectedEntity.vector.provenance}</p><p className="mt-2 line-clamp-2 font-mono text-[10px] text-slate-400">[{selectedEntity.vector.values.slice(0, 8).map(value => value.toFixed(3)).join(", ")}, …]</p></div><div className="grid grid-cols-2 gap-2"><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Parent chain</p><p className="mt-1 font-mono text-sm text-slate-200">{parentChain.length}</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Siblings</p><p className="mt-1 font-mono text-sm text-slate-200">{siblings.length}</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Complexity</p><p className="mt-1 font-mono text-sm text-slate-200">{(selectedEntity.statistics.complexity ?? 0).toFixed(3)}</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Texture</p><p className="mt-1 font-mono text-sm text-slate-200">{(selectedEntity.appearance.textureMeasure ?? 0).toFixed(3)}</p></div></div><div><p className="mb-2 font-mono text-[9px] uppercase tracking-wider text-slate-500">Relationship matrix · strongest edges</p><div className="overflow-hidden rounded border border-white/8"><table className="w-full text-left font-mono text-[9px]"><thead className="bg-white/[0.04] text-slate-500"><tr><th className="px-2 py-1.5">Type</th><th className="px-2 py-1.5">d′</th><th className="px-2 py-1.5">Color</th><th className="px-2 py-1.5">Conf.</th></tr></thead><tbody>{entityRelationships.slice(0, 6).map(edge => <tr key={`${edge.sourceId}-${edge.targetId}`} className="border-t border-white/5 text-slate-300"><td className="px-2 py-1.5 text-cyan-200">{edge.primaryType}</td><td className="px-2 py-1.5">{edge.normalizedDistance.toFixed(3)}</td><td className="px-2 py-1.5">{edge.colorSimilarity.toFixed(2)}</td><td className="px-2 py-1.5">{edge.confidence.toFixed(2)}</td></tr>)}</tbody></table></div></div></div> : <p className="text-xs leading-relaxed text-slate-500">Select an entity to inspect its explicit numerical vector and sparse graph neighborhood.</p>}</section>
+          <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Activity className="h-4 w-4 text-cyan-300" /> Scale consistency</div>{representation ? <div className="space-y-3 text-xs"><p className="font-mono text-[10px] uppercase tracking-wider text-cyan-200">{representation.scale_consistency.status}</p>{representation.scale_consistency.status === "completed" ? <div className="grid grid-cols-2 gap-2">{[["Centroid", representation.scale_consistency.centroidStability], ["Area", representation.scale_consistency.sizeRatioStability], ["Brightness", representation.scale_consistency.brightnessStability], ["Color", representation.scale_consistency.colorStability], ["Neighbors", representation.scale_consistency.relationshipStability]].map(([label, value]) => <div key={String(label)} className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">{label}</p><p className="mt-1 font-mono text-sm text-slate-200">{Number(value ?? 0).toFixed(3)}</p></div>)}</div> : <p className="text-slate-500">The 2× normalized correspondence experiment was skipped for this input.</p>}<div className="border-t border-white/8 pt-2"><p className="font-mono text-[9px] uppercase text-slate-500">Sparse graph timing</p><p className="mt-1 font-mono text-xs text-slate-300">{(representation.profiling.relationshipConstructionMs ?? 0).toFixed(1)} ms · {representation.relationships.length} relevant edges</p></div></div> : <p className="text-xs leading-relaxed text-slate-500">A normalized 2× experiment is recorded with each compatible analysis.</p>}</section>
         </aside>
       </main>
     </div>

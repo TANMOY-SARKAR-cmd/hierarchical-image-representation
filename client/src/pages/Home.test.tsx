@@ -33,6 +33,9 @@ describe("Hierarchy workbench UI", () => {
     const analysisButton = screen.getByRole("button", { name: /run analysis/i });
     expect(screen.getByRole("heading", { name: /hierarchical image workbench/i })).toBeInTheDocument();
     expect(screen.getByText("NO ENTITY TREE LOADED")).toBeInTheDocument();
+    expect(screen.getByText("Complexity heatmap")).toBeInTheDocument();
+    expect(screen.getByText("Relationship graph")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "FULL" })).toBeDisabled();
     expect(analysisButton).toBeDisabled();
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
