@@ -64,4 +64,4 @@
 - [x] Add advanced workbench controls, baseline/parametric/residual comparisons, error overlays, local model inspection, and rate-distortion diagnostics.
 - [x] Add deterministic tests and benchmark coverage for models, residuals, segmentation strategies, quality metrics, and compatibility.
 - [x] Document the v0.4 reconstruction methodology, private-fixture policy, limitations, and deferred non-deterministic methods.
-- [ ] Validate, checkpoint, synchronize, and deliver the advanced reconstruction-fidelity upgrade.
+- [x] Validate, checkpoint, synchronize, and deliver the advanced reconstruction-fidelity upgrade.
