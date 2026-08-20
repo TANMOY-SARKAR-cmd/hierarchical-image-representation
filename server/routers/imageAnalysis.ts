@@ -7,6 +7,7 @@ const analysisConfig = z.object({
   maxFileSizeBytes: z.number().int().min(256 * 1024).max(32 * 1024 * 1024).default(8 * 1024 * 1024),
   maxImagePixels: z.number().int().min(64 * 64).max(2_000_000).default(Number(process.env.MAX_IMAGE_PIXELS ?? 786_432)),
   groupingMethod: z.literal("slic").default("slic"),
+  hierarchyMethod: z.literal("graph_agglomerative").default("graph_agglomerative"),
   scaleLevels: z.array(z.number().int().min(1).max(8)).min(1).max(4).default([1, 2, 4, 8]),
   slicSegments: z.number().int().min(8).max(180).default(72),
   slicCompactness: z.number().min(0.1).max(50).default(10),
@@ -14,6 +15,11 @@ const analysisConfig = z.object({
   hierarchyGroupSize: z.number().int().min(2).max(8).default(3),
   runScaleConsistency: z.boolean().default(true),
   maxConsistencyPixels: z.number().int().min(64 * 64).max(1_500_000).default(786_432),
+  graphK: z.number().int().min(1).max(12).default(3),
+  mergeThreshold: z.number().min(0.1).max(0.95).default(0.58),
+  edgeBarrierThreshold: z.number().min(0).max(1).default(0.70),
+  maxEntityAreaFraction: z.number().min(0.1).max(1).default(0.72),
+  complexityMergePenalty: z.number().min(0).max(0.9).default(0.35),
 });
 
 export const imageAnalysisRouter = router({

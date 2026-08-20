@@ -52,7 +52,7 @@ describe("Node-to-Python image analysis integration", () => {
     const npzArtifact = uploadedArtifacts.find(item => item.contentType === "application/octet-stream");
     const pngArtifacts = uploadedArtifacts.filter(item => item.contentType === "image/png");
     const svgArtifact = uploadedArtifacts.find(item => item.contentType === "image/svg+xml");
-    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ representation_version: "0.2.0" });
+    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ representation_version: "0.3.0", hierarchy: { grouping: "connectivity-constrained graph agglomeration" } });
     expect(npzArtifact?.data.subarray(0, 4).toString("latin1")).toBe("PK\u0003\u0004");
     expect(pngArtifacts).toHaveLength(15);
     expect(pngArtifacts.every(item => item.data.subarray(1, 4).toString("ascii") === "PNG")).toBe(true);

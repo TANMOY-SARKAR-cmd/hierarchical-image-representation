@@ -1,48 +1,63 @@
-# Representation Contract — Version 0.2.0
+# Relational Entity Representation Schema
 
-The versioned export is a portable representation artifact, not a frontend view model. It uses pixel coordinates `[x, y]` and inclusive bounding boxes `[minX, minY, maxX, maxY]`. Backward-compatible aliases (`image`, `scaleLevels`, and `metrics`) are retained alongside the explicit v0.2 names.
+## Version 0.3.0
 
-| Top-level field | Purpose |
-|---|---|
-| `representation_version` | Current schema identifier: `0.2.0`. |
-| `image_metadata` | Source dimensions, channel count, and source byte length. |
-| `feature_schema` | Pixel and region vector fields, dimensions, and NPZ storage locations. |
-| `scales` | Per-scale dimensions, entity count, segmentation characteristics, reconstruction error, and cross-scale links. |
-| `entities` | Hierarchy records with intrinsic geometry, appearance, statistics, vector, parent, children, and cross-scale parent. |
-| `relationships` | Sparse normalized relationship graph records. |
-| `aggregation_methods` | Rules for deriving higher-level vectors from children. |
-| `normalization_methods` | Definitions for scale-relative graph fields. |
-| `reconstruction_metadata` | Level-specific decodes and error-map artifact locations. |
-| `quality_metrics` | MSE, PSNR, SSIM, source/artifact size, overhead, and runtime. |
-| `profiling` | Feature, segmentation, aggregation, graph, reconstruction, consistency, and serialization timing. |
+Version **0.3.0** replaces arbitrary fixed-size parent grouping with deterministic, connectivity-constrained graph agglomeration. Exports retain the v0.2 artifact locations, and `read_compatible_representation` reads both versions without rewriting historical v0.2 results.
 
-## PixelVector
+| Layer | Primary record | Storage rule |
+|---|---|---|
+| Image | Dimensions, source bytes, experiment metadata | JSON |
+| Pixel feature field | Dense `H × W × F` tensor | `features.npz` |
+| Micro-region | Canonical mask-derived entity | JSON plus integer label field |
+| Higher entity | Child IDs, sufficient statistics, union geometry | JSON; no duplicated pixel-coordinate lists |
+| Relationship graph | Sparse same-level, containment, and cross-resolution records | JSON |
 
-`features.npz` stores `pixelVectors` as a dense `H × W × 14` `float32` tensor. Pixels are not expanded into heavyweight JSON objects. `pixelToMicroregion` maps each source pixel to a level-1 micro-region label.
+## Pixel Feature Field
 
-| Ordered fields | Meaning |
-|---|---|
-| `x`, `y` | Normalized source coordinates. |
-| `red`, `green`, `blue` | RGB channels scaled to `[0, 1]`. |
-| `brightness` | Grayscale intensity. |
-| `saturation`, `hue` | HSV appearance components. |
-| `gradient_x`, `gradient_y`, `gradient_magnitude` | Local brightness derivatives. |
-| `edge_strength` | Canny edge response. |
-| `local_variance` | 5×5 brightness-window variance. |
-| `complexity` | Normalized weighted combination of gradients, local variance, and edge signal. |
+`PixelVector@0.3` groups features into geometry, appearance, and local structure. It includes RGB, lightness, HSV, normalized Lab, gradient components and orientation, edge strength, local variance, entropy, and complexity. Coordinates are normalized by image dimensions. Positive local fields use robust median/MAD normalization; edge density and entropy remain bounded unit measures.
 
-## RegionVector and recursive aggregation
+## Entity Model
 
-Every micro-region has a `RegionVector@0.2` with 20 values: centroid, bounding-box origin/size, area, perimeter, compactness, orientation, mean RGB, color variance, brightness mean/variance, gradient, edge density, texture, and child count.
+Every entity recomputes canonical geometry from its current binary mask: bounding box, centroid, area, perimeter, compactness, and orientation. Sufficient statistics retain count, sum, and sum of squares for the primary fields. `EntityVector@0.3` contains structured geometry, appearance, structure, and Hu-moment shape sections plus a flattened numerical vector.
 
-Higher levels do not calculate an unrelated feature vector. Their values are derived from children using area-weighted means, union bounding boxes, summed area/perimeter, circular orientation aggregation, and explicit child-count statistics. Each vector reports both `provenance` and `aggregation` so consumers can distinguish direct pixel aggregates from recursive child aggregates.
+> Leaf membership is retained only as `pixelToMicroregion` in the NPZ artifact. Higher entities reference children; they do not copy member-pixel lists.
 
-## Sparse relationship graph
+## Relationship Model
 
-Relationship construction is **not** `O(N²)`. At each hierarchy level, candidate edges are the union of region-adjacency edges, three nearest normalized-centroid neighbors, and three nearest appearance neighbors. The resulting build complexity is `O(N log N + E)` for `N` sparse entities and `E` retained edges; pixels remain a dense tensor with implicit grid connectivity.
+Candidate edges are the union of region adjacency, spatial K-nearest neighbours, and appearance K-nearest neighbours. `candidateSources` preserves why every edge exists. Same-level records include normalized distance, directional displacement, log area and brightness ratios, normalized Lab distance, texture and shape similarity, boundary contact, confidence, and `mergeAffinity`.
 
-Each relationship has `sourceId`, `targetId`, `relationshipType`, `primaryType`, distance, normalized distance, `dx`, `dy`, normalized deltas, size/area ratio, brightness difference/ratio, color distance/similarity, shape and texture similarity, overlap ratio, boundary contact ratio, containment state/ratio, adjacency, and confidence.
+`normalizedDistance = distance / image_diagonal`; `logAreaRatio = log((sourceArea + ε) / (targetArea + ε))`; and `logBrightnessRatio = log((sourceBrightness + ε) / (targetBrightness + ε))`. Parent-to-child records are explicit `contains` edges. Cross-resolution correspondence uses minimum-cost matching over IoU, normalized centroid distance, appearance difference, and log-area difference.
 
-> `normalizedDistance = distance / image_diagonal`; `normalizedDx = dx / image_width`; `normalizedDy = dy / image_height`; and directed area/brightness ratios include a small epsilon for stability.
+## Hierarchy, Reconstruction, and Scope
 
-The graph stores meaningful relations such as `adjacent`, `near`, `similar_color`, `similar_shape`, `source_in_target`, and `target_in_source`. It intentionally does not claim semantic entity labels.
+The hierarchy is `pixel → micro_region → region → composite → entity → image`. A merge is allowed only when its candidate pair is adjacent, sufficiently affine, below the size bound, and forms a connected mask union. The export records leaf coverage, parent-area conservation, connectivity, cycle count, and duplicate-storage status.
+
+The v0.3 reconstruction remains a constant appearance model with progressive level PNGs, error maps, PSNR, SSIM, MSE, and artifact sizes. Transform stacks, affine/quadratic fields, residual coding, Bézier geometry, learned grouping, and semantic hypotheses are intentionally deferred until structural validity has been evaluated.
+
+## v0.2 to v0.3 Migration
+
+| v0.2 field or behavior | v0.3 replacement | Compatibility treatment |
+|---|---|---|
+| `RegionVector@0.2` | Structured `EntityVector@0.3` plus flattened values | Reader accepts both; new analyses emit v0.3 only |
+| `memberPixels` on each entity | Dense `pixelToMicroregion` plus child references | Removed from v0.3 entities to avoid duplicate storage |
+| Fixed groups of three | Connectivity-constrained graph agglomeration | Superseded for new analyses |
+| Nearest-centroid scale link | IoU/centroid/appearance/area cost assignment | Replaced for native micro-region correspondence |
+| `scaleFactor` terminology | `resolutionFactor` plus retained `scaleFactor` alias | Alias retained for client compatibility |
+
+## Formula Definitions
+
+For source entity `i` and target entity `j`, the normalized spatial distance is
+
+`d′(i,j) = ||cᵢ - cⱼ|| / diagonal(image)`.
+
+The directed area relation is
+
+`logAreaRatio(i,j) = log((Aᵢ + ε) / (Aⱼ + ε))`.
+
+The merge affinity combines configured spatial, appearance, brightness, texture, gradient, shape, and boundary terms. Higher edge density and local complexity lower the final merge score. A candidate is only merged if it is adjacent, exceeds the configured threshold, remains below the configured area bound, and yields one connected union mask.
+
+Cross-resolution matching minimizes
+
+`C(i,j) = 0.45(1 − IoU) + 0.20Dcentroid + 0.20Dappearance + 0.15DlogArea`.
+
+Matches with `C > 0.72` are rejected. Retained correspondence confidence is `1 − C`.

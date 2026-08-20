@@ -40,3 +40,18 @@
 - [x] Add explicit filtered-out graph and relationship guidance when no edge matches the active controls.
 - [x] Exercise graph-edge type, adjacency, confidence, distance, and reset controls in a browser-like UI test.
 - [x] Capture a narrow mobile screenshot of the updated graph-edge filtering controls.
+- [x] Review pasted_content.txt and translate its new requirements into specific implementation tasks.
+- [ ] Implement, validate, checkpoint, and synchronize the new pasted_content.txt requirements in the separate project.
+- [x] Introduce schema v0.3 with a v0.2 compatibility reader, experiment metadata, and reproducible configuration hashing.
+- [x] Split the scientific engine into focused modules while preserving the server-spawned Python contract.
+- [x] Add structured pixel and entity feature schemas, robust feature normalization, Lab color features, gradient orientation, Hu descriptors, and sufficient statistics.
+- [x] Replace arbitrary parent groups with deterministic graph-driven agglomeration constrained by adjacency, affinity, boundary strength, complexity, size, and connectivity.
+- [x] Recalculate merged-entity geometry canonically from mask unions and remove duplicate per-entity member-pixel lists.
+- [x] Build a unified directional and symmetric relationship graph with affinity, candidate sources, log ratios, perceptual color distance, shared-boundary contact, and parent-child containment edges.
+- [x] Implement micro-region IoU, centroid, appearance, and area-cost cross-resolution correspondence with confidence records and clear resolution-versus-hierarchy terminology.
+- [x] Add v0.3 hierarchy, relationship, scale/correspondence, and no-duplicate-storage invariants to the Python test suite.
+- [x] Update the scientific workbench for v0.3 entity/vector, merge-lineage, hierarchy, and cross-resolution correspondence inspection.
+- [x] Document v0.3 architecture, v0.2-to-v0.3 migration, formulas, limitations, and deferred transform/reconstruction research phases.
+- [x] Add explicit root, parent-depth, cycle, correspondence-confidence, and correspondence-cost invariants to v0.3 engine tests.
+- [x] Add a merge-lineage inspector and a cross-resolution correspondence panel to the workbench.
+- [x] Add a v0.2-to-v0.3 migration section and full affinity/correspondence formula definitions to the representation documentation.

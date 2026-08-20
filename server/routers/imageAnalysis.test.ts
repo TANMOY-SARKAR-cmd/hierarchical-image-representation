@@ -16,6 +16,7 @@ const baseInput = {
     maxFileSizeBytes: 1024 * 1024,
     maxImagePixels: 786432,
     groupingMethod: "slic" as const,
+    hierarchyMethod: "graph_agglomerative" as const,
     scaleLevels: [1, 2, 4, 8],
     slicSegments: 72,
     slicCompactness: 10,
@@ -23,6 +24,11 @@ const baseInput = {
     hierarchyGroupSize: 3,
     runScaleConsistency: true,
     maxConsistencyPixels: 786432,
+    graphK: 3,
+    mergeThreshold: 0.58,
+    edgeBarrierThreshold: 0.70,
+    maxEntityAreaFraction: 0.72,
+    complexityMergePenalty: 0.35,
   },
 };
 

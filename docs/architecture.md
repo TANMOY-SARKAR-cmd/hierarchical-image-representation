@@ -1,21 +1,23 @@
-# System Architecture
+# v0.3 Processing Architecture
 
 ```mermaid
-flowchart LR
-  A[Browser workbench] -->|typed tRPC mutation<br/>base64 image + configuration| B[Node / Express server]
-  B -->|validated temporary source file| C[Python child process]
-  C --> D[NumPy feature tensor]
-  C --> E[OpenCV gradients + edges]
-  C --> F[scikit-image SLIC segmentation]
-  F --> G[Region aggregation]
-  G --> H[Multi-scale hierarchy]
-  H --> I[Pairwise relationship graph]
-  I --> J[PNG + SVG reconstruction]
-  J --> K[JSON + NPZ + overlays]
-  K --> L[Managed object storage]
-  L --> A
+flowchart TD
+  U[PNG / JPEG / WebP upload] --> N[Node validation and bounded child-process bridge]
+  N --> P[Python v0.3 engine]
+  P --> F[Dense pixel feature field]
+  F --> S[Deterministic SLIC micro-regions]
+  S --> R[Adjacency graph and sparse candidates]
+  R --> A[Connectivity-constrained graph agglomeration]
+  A --> H[Recursive canonical entity hierarchy]
+  H --> G[Unified relationship graph]
+  S --> C[Cross-resolution correspondence]
+  H --> D[Progressive reconstruction and error maps]
+  G --> X[JSON, NPZ, PNG, SVG, overlays]
+  C --> X
+  D --> X
+  X --> W[Scientific workbench]
 ```
 
-The Node process owns upload validation, timeout enforcement, temporary-workspace cleanup, and artifact persistence. It creates one short-lived Python child process per accepted analysis request. Python writes only small JSON completion output to stdout and stores the generated artifacts in the allocated workspace. After successful completion, Node uploads artifacts to managed object storage and returns typed URLs to the workbench.
+The browser does not execute computer vision. Node validates the input, creates an isolated temporary workspace, invokes the Python entry point with a timeout, uploads completed artifacts, and keeps the representation available for typed inspector queries.
 
-The engine is arranged as distinct stages—feature extraction, grouping, aggregation, hierarchy, relationships, reconstruction, and metrics. Its `GroupingStrategy` interface currently registers `slic`; a future deterministic or learned grouping method can be registered without changing the client-facing representation contract.
+The Python system is divided into schema/configuration, dense features, canonical geometry and sufficient statistics, segmentation, graph construction, hierarchy agglomeration, correspondence, reconstruction, and orchestration modules. This preserves the server interface while allowing later experimental strategies to replace one module at a time.

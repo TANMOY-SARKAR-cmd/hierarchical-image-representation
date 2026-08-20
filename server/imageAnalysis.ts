@@ -9,6 +9,7 @@ export type AnalysisConfig = {
   maxFileSizeBytes: number;
   maxImagePixels: number;
   groupingMethod: "slic";
+  hierarchyMethod: "graph_agglomerative";
   scaleLevels: number[];
   slicSegments: number;
   slicCompactness: number;
@@ -16,6 +17,11 @@ export type AnalysisConfig = {
   hierarchyGroupSize: number;
   runScaleConsistency: boolean;
   maxConsistencyPixels: number;
+  graphK: number;
+  mergeThreshold: number;
+  edgeBarrierThreshold: number;
+  maxEntityAreaFraction: number;
+  complexityMergePenalty: number;
 };
 
 export type AnalysisArtifactUrls = {
@@ -47,7 +53,7 @@ function safeName(fileName: string) {
 }
 
 function runPython(inputPath: string, outputPath: string, config: AnalysisConfig) {
-  const scriptPath = path.join(process.cwd(), "python_engine", "representation_engine_v2.py");
+  const scriptPath = path.join(process.cwd(), "python_engine", "representation_engine_v3.py");
   const python = process.env.PYTHON_EXECUTABLE ?? "python3";
   return new Promise<void>((resolve, reject) => {
     const processHandle = spawn(python, [scriptPath, "--input", inputPath, "--output", outputPath, "--config", JSON.stringify(config)], {

@@ -31,14 +31,16 @@ type Entity = {
   type: string;
   level: number;
   scaleFactor: number;
+  resolutionFactor?: number;
   geometry: Geometry;
   appearance: { meanRGB: number[]; brightness: number; varianceRGB: number[]; brightnessVariance?: number; meanGradient?: number; edgeDensity?: number; textureMeasure?: number };
   statistics: { memberPixelCount: number; complexity?: number; childAreaDistribution?: { min: number; max: number; mean: number; variance: number } };
-  vector: { schema: string; dimension: number; values: number[]; provenance: string; aggregation: string };
-  memberPixels: number[][];
+  vector: { schema: string; dimension: number; values: number[]; provenance: string; aggregation: string; structured?: { geometry?: Record<string, number>; appearance?: Record<string, unknown>; structure?: Record<string, number>; shape?: Record<string, unknown> } };
+  memberPixels?: number[][];
   children: string[];
   parentId: string | null;
   crossScaleParentId: string | null;
+  lineage?: { operation: string; parents: string[] };
 };
 type Relationship = {
   sourceId: string;
@@ -63,6 +65,10 @@ type Relationship = {
   adjacent: boolean;
   overlapRatio: number;
   containment: string;
+  affinity?: number;
+  mergeAffinity?: number;
+  logAreaRatio?: number;
+  candidateSources?: string[];
 };
 type EdgeFilter = { relationshipTypes: string[]; adjacentOnly: boolean; minimumConfidence: number; maximumNormalizedDistance: number };
 type Representation = {
@@ -71,10 +77,15 @@ type Representation = {
   relationships: Relationship[];
   metrics: { mse: number; psnr: number; ssim: number; processingTimeMs: number; representationBytes: number; representationOverhead: number };
   hierarchy: { rootId: string };
-  feature_schema: { PixelVector: { fields: string[] }; RegionVector: { fields: string[]; dimension: number } };
+  representation_version?: string;
+  experiment?: { id: string; engineVersion: string; configHash: string; algorithm: string };
+  feature_schema: { PixelVector: { fields: string[] }; RegionVector?: { fields: string[]; dimension: number }; EntityVector?: { schema: string; categories: string[] } };
   scales: Array<{ scaleFactor: number; entityCount: number; segmentationCharacteristics: { meanComplexity: number; actualSegments: number }; reconstructionError: { psnr: number; ssim: number } }>;
   reconstruction_metadata: { outputs: Record<string, { entityCount: number; mse: number; psnr: number; ssim: number }> };
   scale_consistency: { status: string; centroidStability?: number; sizeRatioStability?: number; brightnessStability?: number; colorStability?: number; relationshipStability?: number };
+  validity?: { connectivityScore: number; leafCoverage: number; parentAreaConservationError: number; hierarchyCycleCount: number; valid: boolean };
+  graph_metadata?: { relationshipDensity: number; candidateSources: string[] };
+  scale_correspondence?: { method: string; links: Array<{ sourceId: string; targetId: string; confidence: number; cost: number; iou: number; centroidDistance: number }> };
   profiling: Record<string, number>;
 };
 
@@ -189,6 +200,12 @@ function GraphEdgeFilterPanel({ representation, relationshipTypes, filteredCount
   </section>;
 }
 
+function V03InspectionPanels({ representation, selectedEntity }: { representation: Representation | null; selectedEntity: Entity | null }) {
+  const correspondence = representation?.scale_correspondence;
+  const selectedLink = correspondence?.links.find(link => link.sourceId === selectedEntity?.id || link.targetId === selectedEntity?.id);
+  return <><section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><TreePine className="h-4 w-4 text-cyan-300" /> Merge lineage</div>{selectedEntity ? <div className="space-y-2 text-xs"><div className="rounded border border-white/8 bg-black/20 p-3"><p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">Operation</p><p className="mt-1 font-mono text-sm text-cyan-100">{selectedEntity.lineage?.operation ?? "legacy"}</p><p className="mt-2 font-mono text-[9px] uppercase tracking-wider text-slate-500">Derived from</p><p className="mt-1 break-all font-mono text-[10px] text-slate-400">{selectedEntity.lineage?.parents.length ? selectedEntity.lineage.parents.join(", ") : "initial segmentation"}</p></div><p className="text-[11px] leading-relaxed text-slate-500">Graph-driven groups retain child lineage while canonical geometry is recomputed from their union mask.</p></div> : <p className="text-xs leading-relaxed text-slate-500">Select an entity to inspect whether it was segmented, carried, merged, or established as the image root.</p>}</section><section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Layers3 className="h-4 w-4 text-cyan-300" /> Cross-resolution correspondence</div>{representation ? <div className="space-y-2 text-xs"><p className="font-mono text-[9px] uppercase tracking-wider text-cyan-200">{correspondence?.method ?? "No correspondence record"}</p><div className="grid grid-cols-2 gap-2"><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Matches</p><p className="mt-1 font-mono text-sm text-slate-200">{correspondence?.links.length ?? 0}</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Selected conf.</p><p className="mt-1 font-mono text-sm text-slate-200">{selectedLink ? selectedLink.confidence.toFixed(3) : "—"}</p></div></div>{selectedLink ? <p className="rounded border border-cyan-200/10 bg-cyan-300/[0.03] p-2 font-mono text-[10px] text-slate-300">IoU {selectedLink.iou.toFixed(3)} · centroid {selectedLink.centroidDistance.toFixed(3)} · cost {selectedLink.cost.toFixed(3)}</p> : <p className="text-[11px] leading-relaxed text-slate-500">Select a native-resolution micro-region to inspect its matched coarser-resolution correspondence.</p>}</div> : <p className="text-xs leading-relaxed text-slate-500">Matches use a minimum-cost assignment across IoU, normalized centroid position, appearance, and area.</p>}</section></>;
+}
+
 /**
  * All content in this page are only for example, replace with your own feature implementation
  * When building pages, remember your instructions in Frontend Workflow, Frontend Best Practices, Design Guide and Common Pitfalls
@@ -275,6 +292,7 @@ export default function Home() {
           maxFileSizeBytes: maxFileSizeMb * 1024 * 1024,
           maxImagePixels: 786432,
           groupingMethod: "slic",
+          hierarchyMethod: "graph_agglomerative",
           scaleLevels,
           slicSegments,
           slicCompactness: compactness,
@@ -282,6 +300,11 @@ export default function Home() {
           hierarchyGroupSize: 3,
           runScaleConsistency: true,
           maxConsistencyPixels: 786432,
+          graphK: 3,
+          mergeThreshold: 0.58,
+          edgeBarrierThreshold: 0.70,
+          maxEntityAreaFraction: 0.72,
+          complexityMergePenalty: 0.35,
         },
       });
       const parsed = result.representation as unknown as Representation;
@@ -292,7 +315,7 @@ export default function Home() {
       setAdjacentOnly(false);
       setMinimumConfidence(0);
       setMaximumNormalizedDistance(1);
-      toast.success("Relational multi-scale analysis completed.");
+      toast.success("Graph-driven relational entity analysis completed.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The analysis could not be completed.");
     }
@@ -317,7 +340,7 @@ export default function Home() {
           </div>
           <div className="hidden items-center gap-3 text-right sm:flex">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">analysis profile</div>
-            <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 font-mono text-[10px] text-cyan-200">DETERMINISTIC · SLIC</div>
+            <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 font-mono text-[10px] text-cyan-200">DETERMINISTIC · SLIC + GRAPH</div>
           </div>
         </div>
       </header>
@@ -387,6 +410,8 @@ export default function Home() {
         </section>
 
         <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+          <V03InspectionPanels representation={representation} selectedEntity={selectedEntity} />
+          <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Network className="h-4 w-4 text-cyan-300" /> Graph hierarchy evidence</div>{representation ? <div className="space-y-3 text-xs"><div className="rounded border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">Experiment</p><p className="mt-1 font-mono text-xs text-cyan-100">{representation.experiment?.engineVersion ?? representation.representation_version ?? "legacy"} · {representation.experiment?.algorithm ?? "deterministic hierarchy"}</p><p className="mt-1 break-all font-mono text-[9px] text-slate-500">{representation.experiment?.configHash ?? "configuration hash unavailable"}</p></div><div className="grid grid-cols-2 gap-2">{[["Connectivity", representation.validity?.connectivityScore ?? 0], ["Leaf coverage", representation.validity?.leafCoverage ?? 0], ["Area error", representation.validity?.parentAreaConservationError ?? 0], ["Graph density", representation.graph_metadata?.relationshipDensity ?? 0]].map(([label, value]) => <div key={String(label)} className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">{label}</p><p className="mt-1 font-mono text-sm text-slate-200">{Number(value).toFixed(3)}</p></div>)}</div><p className={cn("font-mono text-[10px] uppercase tracking-wider", representation.validity?.valid ? "text-emerald-200" : "text-amber-200")}>{representation.validity?.valid ? "Invariant checks passed" : "Review representation invariants"}</p></div> : <p className="text-xs leading-relaxed text-slate-500">v0.3 reports graph affinity, connectivity, coverage, and canonical geometry invariants after analysis.</p>}</section>
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Activity className="h-4 w-4 text-cyan-300" /> Quality metrics</div>{representation ? <div className="grid grid-cols-2 gap-2">{[["PSNR", `${representation.metrics.psnr.toFixed(2)} dB`, "cyan"], ["SSIM", representation.metrics.ssim.toFixed(4), "emerald"], ["MSE", representation.metrics.mse.toFixed(2), "amber"], ["Overhead", `${representation.metrics.representationOverhead.toFixed(1)}×`, "violet"], ["Runtime", `${representation.metrics.processingTimeMs.toFixed(0)} ms`, "cyan"], ["Artifact", formatBytes(representation.metrics.representationBytes), "slate"]].map(([label, value, tone]) => <div key={label} className="rounded-md border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500">{label}</p><p className={cn("mt-1 font-mono text-sm font-semibold", tone === "cyan" ? "text-cyan-200" : tone === "emerald" ? "text-emerald-200" : tone === "amber" ? "text-amber-200" : tone === "violet" ? "text-violet-200" : "text-slate-200")}>{value}</p></div>)}</div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Fidelity and artifact metrics appear after region decoding.</p>}</section>
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Boxes className="h-4 w-4 text-cyan-300" /> Entity inspector</div>{selectedEntity ? <div className="space-y-4 text-xs"><div><p className="font-mono text-[10px] uppercase tracking-[0.15em] text-cyan-300">{selectedEntity.type.replace("_", " ")} · L{selectedEntity.level}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-500">{selectedEntity.id}</p></div><div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md border border-white/8 bg-black/20 p-3"><span className="text-slate-500">Bounding box</span><span className="font-mono text-right text-slate-200">[{selectedEntity.geometry.boundingBox.join(", ")}]</span><span className="text-slate-500">Centroid</span><span className="font-mono text-right text-slate-200">({selectedEntity.geometry.centroid.map(value => value.toFixed(1)).join(", ")})</span><span className="text-slate-500">Area</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.area} px</span><span className="text-slate-500">Perimeter</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.perimeter.toFixed(1)}</span><span className="text-slate-500">Orientation</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.orientation.toFixed(1)}°</span><span className="text-slate-500">Mean RGB</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.meanRGB.map(value => value.toFixed(0)).join(", ")}</span><span className="text-slate-500">Brightness</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.brightness.toFixed(3)}</span><span className="text-slate-500">Members</span><span className="font-mono text-right text-slate-200">{selectedEntity.statistics.memberPixelCount}</span></div><div><p className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500">Relationships · {entityRelationships.length}</p><div className="max-h-40 space-y-1 overflow-auto pr-1">{entityRelationships.slice(0, 12).map(relationship => <div key={`${relationship.sourceId}-${relationship.targetId}`} className="rounded border border-white/7 bg-black/15 p-2 font-mono text-[10px] text-slate-400"><span className={relationship.adjacent ? "text-emerald-300" : "text-slate-500"}>{relationship.primaryType.toUpperCase()}</span> · d {relationship.normalizedDistance.toFixed(3)} · Δc {relationship.colorDistance.toFixed(1)} · θ {relationship.angle.toFixed(1)}°</div>) || <p className="text-slate-600">No sparse relationships for this entity.</p>}</div></div></div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Choose an entity in the hierarchy to inspect its exact geometry, appearance, vectors, and graph relationships.</p>}</section>
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Network className="h-4 w-4 text-cyan-300" /> Relational context</div>{selectedEntity ? <div className="space-y-3 text-xs"><div className="rounded border border-white/8 bg-black/20 p-3"><div className="flex items-center justify-between"><span className="text-slate-500">Vector</span><span className="font-mono text-cyan-200">{selectedEntity.vector.dimension}D</span></div><p className="mt-1 font-mono text-[10px] text-slate-500">{selectedEntity.vector.provenance}</p><p className="mt-2 line-clamp-2 font-mono text-[10px] text-slate-400">[{selectedEntity.vector.values.slice(0, 8).map(value => value.toFixed(3)).join(", ")}, …]</p></div><div className="grid grid-cols-2 gap-2"><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Parent chain</p><p className="mt-1 font-mono text-sm text-slate-200">{parentChain.length}</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Siblings</p><p className="mt-1 font-mono text-sm text-slate-200">{siblings.length}</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Complexity</p><p className="mt-1 font-mono text-sm text-slate-200">{(selectedEntity.statistics.complexity ?? 0).toFixed(3)}</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Texture</p><p className="mt-1 font-mono text-sm text-slate-200">{(selectedEntity.appearance.textureMeasure ?? 0).toFixed(3)}</p></div></div><div><p className="mb-2 font-mono text-[9px] uppercase tracking-wider text-slate-500">Relationship matrix · strongest edges</p><div className="overflow-hidden rounded border border-white/8"><table className="w-full text-left font-mono text-[9px]"><thead className="bg-white/[0.04] text-slate-500"><tr><th className="px-2 py-1.5">Type</th><th className="px-2 py-1.5">d′</th><th className="px-2 py-1.5">Color</th><th className="px-2 py-1.5">Conf.</th></tr></thead><tbody>{entityRelationships.slice(0, 6).map(edge => <tr key={`${edge.sourceId}-${edge.targetId}`} className="border-t border-white/5 text-slate-300"><td className="px-2 py-1.5 text-cyan-200">{edge.primaryType}</td><td className="px-2 py-1.5">{edge.normalizedDistance.toFixed(3)}</td><td className="px-2 py-1.5">{edge.colorSimilarity.toFixed(2)}</td><td className="px-2 py-1.5">{edge.confidence.toFixed(2)}</td></tr>)}</tbody></table></div></div></div> : <p className="text-xs leading-relaxed text-slate-500">Select an entity to inspect its explicit numerical vector and sparse graph neighborhood.</p>}</section>
