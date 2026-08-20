@@ -36,7 +36,7 @@
 - [x] Add user-selected graph-edge filters for relationship type, adjacency, confidence, and normalized distance.
 - [x] Apply the active edge filters consistently to relationship counts, the inspector matrix, and graph visualization guidance.
 - [x] Add automated UI coverage for graph-edge filter controls and verify the updated workbench on desktop and mobile.
-- [ ] Checkpoint and synchronize the graph-edge filtering enhancement to the separate GitHub repository.
+- [x] Checkpoint and synchronize the graph-edge filtering enhancement to the separate GitHub repository.
 - [x] Add explicit filtered-out graph and relationship guidance when no edge matches the active controls.
 - [x] Exercise graph-edge type, adjacency, confidence, distance, and reset controls in a browser-like UI test.
 - [x] Capture a narrow mobile screenshot of the updated graph-edge filtering controls.
