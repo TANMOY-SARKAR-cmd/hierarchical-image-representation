@@ -32,6 +32,13 @@ class BenchmarkSuiteTest(unittest.TestCase):
             self.assertIn("AVIF", first["codecComparisons"])
             natural_photo = next(record for record in report["records"] if record["category"] == "natural_photo_sample")
             self.assertEqual(natural_photo["provenance"], "bundled_real_photo")
+            eligible_categories = {"geometric_shapes", "flat_illustration", "logo_like", "pixel_art", "natural_photo_sample"}
+            for record in report["records"]:
+                if record["category"] in eligible_categories:
+                    self.assertGreater(record["mergeTree"]["nodeCount"], 0, record["category"])
+                representation = json.loads((output / record["category"] / "representation.json").read_text())
+                serialized_relationships = [json.dumps(item, sort_keys=True, separators=(",", ":")) for item in representation["relationships"]]
+                self.assertEqual(len(serialized_relationships), len(set(serialized_relationships)), record["category"])
 
 
 if __name__ == "__main__":

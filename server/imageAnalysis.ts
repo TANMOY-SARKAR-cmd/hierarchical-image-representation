@@ -6,6 +6,7 @@ import { gunzipSync } from "zlib";
 import { nanoid } from "nanoid";
 import { PNG } from "pngjs";
 import { storageGetSignedUrl, storagePut } from "./storage";
+import { discardAnalysisManifest, getAnalysisManifest, saveAnalysisManifest } from "./db";
 
 export type AnalysisConfig = {
   maxFileSizeBytes: number;
@@ -38,7 +39,6 @@ export type AnalysisConfig = {
   boundaryGradientPercentile: number;
   topology: "4-neighbour";
   graphK: number;
-  mergeThreshold: number;
   edgeBarrierThreshold: number;
   maxEntityAreaFraction: number;
   complexityMergePenalty: number;
@@ -85,7 +85,7 @@ export type AnalysisResult = {
 export type AnalysisJobStatus = {
   jobId: string;
   ownerId: string;
-  status: "queued" | "running" | "uploading" | "completed" | "failed";
+  status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled";
   stage: string;
   percent: number;
   message: string;
@@ -127,6 +127,8 @@ const ERROR_HEATMAP_REFERENCE_DELTA = 32;
 const MAX_THRESHOLD_HEATMAPS = 96;
 const decodedErrorEvidence = new Map<string, { width: number; height: number; values: Uint16Array }>();
 const thresholdedHeatmapUrls = new Map<string, string>();
+const activeProcesses = new Map<string, ReturnType<typeof spawn>>();
+const cancelledJobIds = new Set<string>();
 
 function positiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -135,6 +137,14 @@ function positiveInteger(value: string | undefined, fallback: number) {
 
 export class AnalysisAdmissionError extends Error {
   readonly code = "TOO_MANY_REQUESTS";
+}
+
+export class AnalysisCancelledError extends Error {
+  readonly code = "CANCELLED";
+}
+
+export class AnalysisInputError extends Error {
+  readonly code = "BAD_INPUT";
 }
 
 export class AnalysisSubmissionAdmission {
@@ -198,6 +208,10 @@ export class AnalysisResultCache {
     return result;
   }
 
+  remove(jobId: string) {
+    this.results.delete(jobId);
+  }
+
   telemetry(now = Date.now()): CacheRetentionTelemetry {
     this.purge(now);
     const activeEntries = this.results.size;
@@ -244,7 +258,7 @@ export class AnalysisJobStore {
 
   update(jobId: string, update: AnalysisProgressEvent, now = Date.now()) {
     const job = this.jobs.get(jobId);
-    if (!job || job.status === "completed" || job.status === "failed") return null;
+    if (!job || job.status === "completed" || job.status === "failed" || job.status === "cancelled") return null;
     const next = { ...job, ...update, percent: Math.max(job.percent, Math.min(99, Math.round(update.percent))), updatedAt: now };
     this.jobs.set(jobId, next);
     return next;
@@ -262,6 +276,14 @@ export class AnalysisJobStore {
     const job = this.jobs.get(jobId);
     if (!job) return null;
     const next = { ...job, status: "failed" as const, stage: "failed", message: "Analysis did not complete.", updatedAt: now, completedAt: now, error, resultAvailable: false };
+    this.jobs.set(jobId, next);
+    return next;
+  }
+
+  cancel(jobId: string, now = Date.now()) {
+    const job = this.jobs.get(jobId);
+    if (!job || job.status === "completed" || job.status === "failed" || job.status === "cancelled") return null;
+    const next = { ...job, status: "cancelled" as const, stage: "cancelled", message: "Analysis was cancelled before completion.", updatedAt: now, completedAt: now, error: null, resultAvailable: false };
     this.jobs.set(jobId, next);
     return next;
   }
@@ -314,7 +336,18 @@ export function validateImageSignature(data: Buffer, mimeType: string, extension
   if (mimeType !== expectedMime || !signatureMatches) throw new Error("The uploaded image filename, MIME type, and binary signature must agree.");
 }
 
-function runPython(inputPath: string, outputPath: string, config: AnalysisConfig, onProgress?: (event: AnalysisProgressEvent) => void) {
+function preflightAnalysisInput(input: { fileName: string; mimeType: string; dataBase64: string; config: AnalysisConfig }) {
+  if (!supportedMimeTypes.has(input.mimeType)) throw new AnalysisInputError("Supported image formats are PNG, JPEG, and WebP.");
+  const extension = safeName(input.fileName);
+  const data = decodeBase64Image(input.dataBase64);
+  validateImageSignature(data, input.mimeType, extension);
+  const hardLimit = Number(process.env.MAX_IMAGE_BYTES ?? 8 * 1024 * 1024);
+  const allowedSize = Math.min(input.config.maxFileSizeBytes, hardLimit);
+  if (data.byteLength > allowedSize) throw new AnalysisInputError(`The uploaded image exceeds the configured ${(allowedSize / 1024 / 1024).toFixed(1)} MB limit.`);
+  return { data, extension };
+}
+
+function runPython(inputPath: string, outputPath: string, config: AnalysisConfig, onProgress?: (event: AnalysisProgressEvent) => void, jobId?: string) {
   const scriptPath = path.join(process.cwd(), "python_engine", "representation_engine.py");
   const python = process.env.PYTHON_EXECUTABLE ?? "python3";
   return new Promise<void>((resolve, reject) => {
@@ -322,6 +355,7 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
     });
+    if (jobId) activeProcesses.set(jobId, processHandle);
     let stdout = "";
     let stdoutBuffer = "";
     let stderr = "";
@@ -353,6 +387,12 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
     });
     processHandle.on("close", code => {
       clearTimeout(timeout);
+      if (jobId) activeProcesses.delete(jobId);
+      if (jobId && cancelledJobIds.has(jobId)) {
+        cancelledJobIds.delete(jobId);
+        reject(new AnalysisCancelledError("Analysis was cancelled before completion."));
+        return;
+      }
       if (code !== 0) {
         reject(new Error(`The Python analysis engine failed (${code}): ${stderr.slice(-1200)}`));
         return;
@@ -404,8 +444,8 @@ function heatmapColor(value: number) {
   return t < 0.5 ? [Math.round(90 * t * 2), Math.round(24 * t * 2), Math.round(120 + 120 * t * 2)] : [Math.round(180 + 75 * (t - 0.5) * 2), Math.round(48 + 180 * (t - 0.5) * 2), Math.round(240 - 200 * (t - 0.5) * 2)];
 }
 
-function requirePrivateErrorEvidence(jobId: string, ownerId: string, mode: string) {
-  const result = getAnalysisResult(jobId);
+async function requirePrivateErrorEvidence(jobId: string, ownerId: string, mode: string) {
+  const result = await getAnalysisResult(jobId);
   if (!result || result.ownerId !== ownerId) throw new Error("This analysis result is not available to the current user.");
   const evidence = result.errorEvidence?.[mode];
   if (!evidence) throw new Error("Exact error evidence is unavailable for the selected reconstruction.");
@@ -413,7 +453,7 @@ function requirePrivateErrorEvidence(jobId: string, ownerId: string, mode: strin
 }
 
 export async function getLocalErrorSample(jobId: string, ownerId: string, mode: string, x: number, y: number) {
-  const { evidence } = requirePrivateErrorEvidence(jobId, ownerId, mode);
+  const { evidence } = await requirePrivateErrorEvidence(jobId, ownerId, mode);
   if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= evidence.width || y >= evidence.height) throw new Error("Requested error coordinate is outside the reconstruction bounds.");
   const decoded = await loadErrorEvidence(evidence);
   const channelSum = decoded.values[y * decoded.width + x] ?? 0;
@@ -423,7 +463,7 @@ export async function getLocalErrorSample(jobId: string, ownerId: string, mode: 
 export async function getThresholdedErrorHeatmap(jobId: string, ownerId: string, mode: string, thresholdDelta: number) {
   if (!Number.isFinite(thresholdDelta) || thresholdDelta < 0 || thresholdDelta > ERROR_HEATMAP_REFERENCE_DELTA) throw new Error("Heatmap threshold must be between 0 and 32 ΔRGB.");
   const threshold = Math.round(thresholdDelta);
-  const { evidence } = requirePrivateErrorEvidence(jobId, ownerId, mode);
+  const { evidence } = await requirePrivateErrorEvidence(jobId, ownerId, mode);
   const cacheKey = `${jobId}:${mode}:${threshold}`;
   const cached = thresholdedHeatmapUrls.get(cacheKey);
   if (cached) return { mode, thresholdDelta: threshold, url: cached, referenceMeanAbsoluteRgbDelta: ERROR_HEATMAP_REFERENCE_DELTA };
@@ -434,9 +474,9 @@ export async function getThresholdedErrorHeatmap(jobId: string, ownerId: string,
     png.data[offset] = r; png.data[offset + 1] = g; png.data[offset + 2] = b;
     png.data[offset + 3] = delta <= threshold ? 0 : Math.round(Math.pow((delta - threshold) / Math.max(ERROR_HEATMAP_REFERENCE_DELTA - threshold, 1), 0.75) * 255);
   }
-  const uploaded = await storagePut(`hierarchical-image-representation/${jobId}/errors/thresholded/${mode}-${threshold}.png`, PNG.sync.write(png), "image/png");
-  boundedSet(thresholdedHeatmapUrls, cacheKey, uploaded.url, MAX_THRESHOLD_HEATMAPS);
-  return { mode, thresholdDelta: threshold, url: uploaded.url, referenceMeanAbsoluteRgbDelta: ERROR_HEATMAP_REFERENCE_DELTA };
+  const url = `data:image/png;base64,${PNG.sync.write(png).toString("base64")}`;
+  boundedSet(thresholdedHeatmapUrls, cacheKey, url, MAX_THRESHOLD_HEATMAPS);
+  return { mode, thresholdDelta: threshold, url, referenceMeanAbsoluteRgbDelta: ERROR_HEATMAP_REFERENCE_DELTA };
 }
 
 export async function analyzeImage(input: {
@@ -444,21 +484,11 @@ export async function analyzeImage(input: {
   mimeType: string;
   dataBase64: string;
   config: AnalysisConfig;
-}, ownerId = "direct", admissionKey = `direct:${ownerId}`, run?: { jobId?: string; onProgress?: (event: AnalysisProgressEvent) => void }): Promise<AnalysisResult> {
+}, ownerId = "direct", admissionKey = `direct:${ownerId}`, run?: { jobId?: string; onProgress?: (event: AnalysisProgressEvent) => void; admissionReserved?: boolean }): Promise<AnalysisResult> {
   run?.onProgress?.({ status: "running", stage: "validating_input", percent: 1, message: "Validating the uploaded image and configured limits." });
-  if (!supportedMimeTypes.has(input.mimeType)) {
-    throw new Error("Supported image formats are PNG, JPEG, and WebP.");
-  }
-  const extension = safeName(input.fileName);
-  const data = decodeBase64Image(input.dataBase64);
-  validateImageSignature(data, input.mimeType, extension);
-  const hardLimit = Number(process.env.MAX_IMAGE_BYTES ?? 8 * 1024 * 1024);
-  const allowedSize = Math.min(input.config.maxFileSizeBytes, hardLimit);
-  if (data.byteLength > allowedSize) {
-    throw new Error(`The uploaded image exceeds the configured ${(allowedSize / 1024 / 1024).toFixed(1)} MB limit.`);
-  }
+  const { extension, data } = preflightAnalysisInput(input);
 
-  submissionAdmission.acquire(admissionKey);
+  if (!run?.admissionReserved) submissionAdmission.acquire(admissionKey);
   try {
     const jobId = run?.jobId ?? nanoid(14);
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "hierarchy-analysis-"));
@@ -467,7 +497,7 @@ export async function analyzeImage(input: {
     try {
       await fs.mkdir(outputPath, { recursive: true });
       await fs.writeFile(inputPath, data);
-      await runPython(inputPath, outputPath, input.config, run?.onProgress);
+      await runPython(inputPath, outputPath, input.config, run?.onProgress, run?.jobId);
       const representation = JSON.parse(await fs.readFile(path.join(outputPath, "representation.json"), "utf8")) as Record<string, unknown>;
     run?.onProgress?.({ status: "uploading", stage: "uploading_artifacts", percent: 97, message: "Uploading private analysis artifacts for the completed run." });
     const overlayUrls = {
@@ -520,6 +550,7 @@ export async function analyzeImage(input: {
     };
       const result = { jobId, ownerId, representation, artifactUrls, errorEvidence };
       activeResults.remember(result);
+      await saveAnalysisManifest({ jobId, ownerId, status: "completed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), payload: JSON.stringify(result) });
       run?.onProgress?.({ status: "uploading", stage: "finalizing", percent: 99, message: "Finalizing owner-scoped analysis results." });
       return result;
     } finally {
@@ -530,21 +561,84 @@ export async function analyzeImage(input: {
   }
 }
 
-export function getAnalysisResult(jobId: string) {
-  return activeResults.get(jobId);
+function clearLocalJobEvidence(jobId: string) {
+  for (const key of Array.from(thresholdedHeatmapUrls.keys())) if (key.startsWith(`${jobId}:`)) thresholdedHeatmapUrls.delete(key);
+  for (const key of Array.from(decodedErrorEvidence.keys())) if (key.includes(`/${jobId}/`)) decodedErrorEvidence.delete(key);
 }
 
-export function startAnalysisJob(input: { fileName: string; mimeType: string; dataBase64: string; config: AnalysisConfig }, ownerId: string, admissionKey: string) {
+export async function getAnalysisResult(jobId: string) {
+  const cached = activeResults.get(jobId);
+  if (cached) return cached;
+  const manifest = await getAnalysisManifest(jobId);
+  if (!manifest || manifest.status !== "completed" || manifest.expiresAt.getTime() <= Date.now() || !manifest.payload) {
+    clearLocalJobEvidence(jobId);
+    return null;
+  }
+  try {
+    const result = JSON.parse(manifest.payload) as AnalysisResult;
+    if (result.jobId !== jobId || result.ownerId !== manifest.ownerId) return null;
+    activeResults.remember(result);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+export async function startAnalysisJob(input: { fileName: string; mimeType: string; dataBase64: string; config: AnalysisConfig }, ownerId: string, admissionKey: string) {
+  preflightAnalysisInput(input);
+  submissionAdmission.acquire(admissionKey);
   const jobId = nanoid(14);
   const job = activeJobs.create(jobId, ownerId);
-  void analyzeImage(input, ownerId, admissionKey, { jobId, onProgress: update => activeJobs.update(jobId, update) })
-    .then(() => activeJobs.complete(jobId))
-    .catch(error => activeJobs.fail(jobId, error instanceof Error ? error.message : "Image analysis could not be completed."));
+  try {
+    await saveAnalysisManifest({ jobId, ownerId, status: "queued", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS) });
+  } catch (error) {
+    submissionAdmission.release();
+    activeJobs.fail(jobId, error instanceof Error ? error.message : "Analysis could not be scheduled.");
+    throw error;
+  }
+  void analyzeImage(input, ownerId, admissionKey, { jobId, admissionReserved: true, onProgress: update => {
+    activeJobs.update(jobId, update);
+    const status = update.status === "running" || update.status === "uploading" ? update.status : "queued";
+    void saveAnalysisManifest({ jobId, ownerId, status, expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS) }).catch(() => undefined);
+  } })
+    .then(async () => {
+      activeJobs.complete(jobId);
+    })
+    .catch(async error => {
+      const cancelled = error instanceof AnalysisCancelledError;
+      if (cancelled) activeJobs.cancel(jobId);
+      else activeJobs.fail(jobId, error instanceof Error ? error.message : "Image analysis could not be completed.");
+      await saveAnalysisManifest({ jobId, ownerId, status: cancelled ? "cancelled" : "failed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), error: cancelled ? null : error instanceof Error ? error.message : "Image analysis could not be completed." }).catch(() => undefined);
+    });
   return job;
 }
 
-export function getAnalysisJob(jobId: string) {
-  return activeJobs.get(jobId);
+export async function getAnalysisJob(jobId: string) {
+  const active = activeJobs.get(jobId);
+  if (active) return active;
+  const manifest = await getAnalysisManifest(jobId);
+  if (!manifest || manifest.status === "discarded" || manifest.expiresAt.getTime() <= Date.now()) return null;
+  const terminal = manifest.status === "completed" || manifest.status === "failed" || manifest.status === "cancelled";
+  return { jobId, ownerId: manifest.ownerId, status: manifest.status as AnalysisJobStatus["status"], stage: manifest.status, percent: manifest.status === "completed" ? 100 : 0, message: terminal ? manifest.status === "completed" ? "Analysis result remains available." : manifest.status === "cancelled" ? "Analysis was cancelled." : "Analysis did not complete." : "Analysis state is being restored.", createdAt: manifest.createdAt.getTime(), updatedAt: manifest.updatedAt.getTime(), completedAt: manifest.completedAt?.getTime() ?? null, error: manifest.error ?? null, resultAvailable: manifest.status === "completed" };
+}
+
+export async function cancelAnalysisJob(jobId: string, ownerId: string) {
+  const job = await getAnalysisJob(jobId);
+  if (!job || job.ownerId !== ownerId) return null;
+  if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return job;
+  cancelledJobIds.add(jobId);
+  activeProcesses.get(jobId)?.kill("SIGKILL");
+  const cancelled = activeJobs.cancel(jobId) ?? { ...job, status: "cancelled" as const, stage: "cancelled", percent: job.percent, message: "Analysis was cancelled before completion.", completedAt: Date.now(), updatedAt: Date.now(), error: null, resultAvailable: false };
+  await saveAnalysisManifest({ jobId, ownerId, status: "cancelled", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date() }).catch(() => undefined);
+  return cancelled;
+}
+
+export async function discardAnalysisResult(jobId: string, ownerId: string) {
+  const result = await getAnalysisResult(jobId);
+  if (!result || result.ownerId !== ownerId) return false;
+  activeResults.remove(jobId);
+  clearLocalJobEvidence(jobId);
+  return discardAnalysisManifest(jobId, ownerId);
 }
 
 export function getAnalysisCacheTelemetry() {

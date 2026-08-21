@@ -39,6 +39,7 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertIn("appearance.lab_l", fields); self.assertIn("local_structure.gradient_orientation", fields)
             self.assertEqual(representation["hierarchy"]["grouping"], "global_energy_scored_4_neighbour_merge_tree_with_derived_cuts")
             self.assertIn("treeNodeIds", representation["hierarchy"])
+            self.assertGreater(len(representation["hierarchy"]["treeNodeIds"]), 0)
             self.assertEqual(set(representation["hierarchy"]["cuts"]), {"region", "composite", "entity"})
             self.assertEqual(representation["hierarchy"]["rootSemantics"], "explicit_full_image_anchor_not_inferred_agglomeration")
             self.assertTrue(representation["experiment"]["researchPrototype"])
@@ -68,6 +69,9 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             same_level = [item for item in representation["relationships"] if item.get("candidateSources") and "hierarchy" not in item["candidateSources"]]
             self.assertGreater(len(same_level), 0)
             self.assertTrue(all("candidateSources" in item and "mergeAffinity" in item and "logAreaRatio" in item for item in same_level))
+            serialized_relationships = [json.dumps(item, sort_keys=True, separators=(",", ":")) for item in representation["relationships"]]
+            self.assertEqual(len(serialized_relationships), len(set(serialized_relationships)))
+            self.assertTrue(any(item.get("derivedCutViews") for item in same_level))
             self.assertTrue(any(item.get("primaryType") == "contains" for item in representation["relationships"]))
             self.assertEqual(representation["scale_correspondence"]["method"].split(" ")[0], "Hungarian")
             self.assertGreater(len(representation["scale_correspondence"]["links"]), 0)
@@ -81,6 +85,7 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertTrue(all("crossScaleParentId" not in entity for entity in representation["entities"]))
             self.assertTrue(any(entity.get("crossScaleMatchId") for entity in representation["entities"]))
             self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.7")
+            self.assertNotIn("mergeThreshold", representation["configuration"])
             self.assertIn("slic", representation["segmentationDiagnostics"])
             self.assertIn("residual", representation["reconstruction_metadata"]["outputs"])
             self.assertIn("parametric", representation["reconstruction_metadata"]["heuristicRateDistortion"]["modes"])

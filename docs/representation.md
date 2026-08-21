@@ -86,7 +86,17 @@ Residual mode quantizes RGB correction candidates and ranks them by their **meas
 
 Creating an analysis and reading its result, entity, hierarchy, relationships, or artifact manifest require authentication. Every in-memory result is scoped to the submitting identity. A request for another user’s result returns `NOT_FOUND` rather than exposing whether it exists.
 
-Upload admission validates canonical base64 plus consistent filename extension, MIME type, and binary signature for PNG, JPEG, or WebP. It enforces byte and pixel ceilings, temporary-workspace cleanup, a 120-second child-process limit, fixed-window per-user submission limits, and a process-local concurrent-job cap. Completed result metadata remains process-local under configurable TTL and capacity eviction; aggregate-only cache telemetry is administrator-only.
+Upload admission validates canonical base64 plus consistent filename extension, MIME type, and binary signature for PNG, JPEG, or WebP **before** accepting an asynchronous job. It enforces byte and pixel ceilings, temporary-workspace cleanup, a 120-second child-process limit, fixed-window per-user submission limits, and a process-local concurrent-job cap. A durable owner-scoped manifest records queued, running, uploading, completed, failed, cancelled, and discarded availability states. Completed result payloads can be restored after process-local cache eviction until their configured expiry; aggregate-only cache telemetry is administrator-only.
+
+Users may cancel an in-flight analysis through the workbench. A cancellation terminates the active Python child process, records a terminal `cancelled` state, and never exposes a partial result. Users may also discard a completed analysis from the workbench. Discarding removes cached result and inspection evidence and revokes the manifest payload and workbench artifact references. The current storage interface does not expose physical object deletion, so discard is access revocation rather than an assertion of immediate backend byte erasure.
+
+Thresholded ΔRGB previews are rendered server-side from private exact evidence, returned as bounded in-memory data URLs, and never create a new persistent storage object for each slider threshold.
+
+## Merge Calibration and Canonical Relationships
+
+New analyses use a conservative `mergeEnergyThreshold` default of `0.05`. This accepts evidence-backed low-cost merges on eligible structured fixtures while retaining the existing boundary and area guards. Continuous gradients and texture-dominated inputs can correctly retain zero accepted merges when no candidate satisfies the energy criterion; a zero-merge result is therefore diagnostic evidence, not a hidden failure.
+
+Derived region, composite, and entity cuts can resolve to the same tree nodes in a shallow hierarchy. Equivalent sparse graph records are emitted once with `derivedCutViews` membership rather than repeated as indistinguishable edge payloads. The retired `mergeThreshold` field is not part of the active public or serialized configuration contract.
 
 ## Parameter-Sensitivity Evidence
 

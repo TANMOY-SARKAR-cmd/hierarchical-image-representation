@@ -4,6 +4,8 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const startMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
+const cancelMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
+const discardMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
 const jobStatusQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const resultQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const telemetryQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
@@ -16,6 +18,8 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     imageAnalysis: {
       start: { useMutation: () => startMutation },
+      cancel: { useMutation: () => cancelMutation },
+      discard: { useMutation: () => discardMutation },
       status: { useQuery: (input: { jobId: string }) => input.jobId === "job-1" ? jobStatusQuery : { data: undefined, isLoading: false } },
       result: { useQuery: (input: { jobId: string }) => input.jobId === "job-1" ? resultQuery : { data: undefined, isLoading: false } },
       thresholdedHeatmap: { useQuery: () => thresholdedHeatmapQuery },
@@ -53,6 +57,8 @@ describe("Hierarchy workbench UI", () => {
 
   beforeEach(() => {
     startMutation.mutateAsync.mockReset();
+    cancelMutation.mutateAsync.mockReset();
+    discardMutation.mutateAsync.mockReset();
     jobStatusQuery.data = undefined;
     resultQuery.data = undefined;
     thresholdedHeatmapQuery.data = undefined;
@@ -116,6 +122,18 @@ describe("Hierarchy workbench UI", () => {
     expect(progress).toHaveAttribute("aria-valuenow", "38");
     expect(view.getByRole("heading", { name: "segmentation" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: /segmentation/i })).toBeDisabled();
+  });
+
+  it("offers an owner-scoped cancellation action while analysis is active", async () => {
+    authState.user = { role: "user" };
+    startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
+    cancelMutation.mutateAsync.mockResolvedValue({ jobId: "job-1", status: "cancelled" });
+    jobStatusQuery.data = { jobId: "job-1", status: "running", stage: "segmentation", percent: 38, message: "Built deterministic micro-regions.", createdAt: Date.now() - 4_000, updatedAt: Date.now(), completedAt: null, error: null, resultAvailable: false };
+    const view = render(<Home />);
+    fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
+    fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
+    fireEvent.click(await view.findByRole("button", { name: "Cancel analysis" }));
+    expect(cancelMutation.mutateAsync).toHaveBeenCalledWith({ jobId: "job-1" });
   });
 
   it("renders duplicate-endpoint relationships without a React duplicate-key warning", async () => {

@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { analysisManifests, InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,43 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+export type PersistedAnalysisManifest = {
+  jobId: string;
+  ownerId: string;
+  status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled" | "discarded";
+  expiresAt: Date;
+  completedAt?: Date | null;
+  discardedAt?: Date | null;
+  error?: string | null;
+  payload?: string | null;
+};
+
+export async function saveAnalysisManifest(manifest: PersistedAnalysisManifest): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(analysisManifests).values(manifest).onDuplicateKeyUpdate({
+    set: {
+      ownerId: manifest.ownerId,
+      status: manifest.status,
+      expiresAt: manifest.expiresAt,
+      completedAt: manifest.completedAt ?? null,
+      discardedAt: manifest.discardedAt ?? null,
+      error: manifest.error ?? null,
+      payload: manifest.payload ?? null,
+    },
+  });
+}
+
+export async function getAnalysisManifest(jobId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(analysisManifests).where(eq(analysisManifests.jobId, jobId)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function discardAnalysisManifest(jobId: string, ownerId: string, now = new Date()): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db.update(analysisManifests).set({ status: "discarded", discardedAt: now, payload: null }).where(and(eq(analysisManifests.jobId, jobId), eq(analysisManifests.ownerId, ownerId)));
+  return Number(result[0]?.affectedRows ?? 0) > 0;
+}

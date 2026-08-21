@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../imageAnalysis", () => ({
   AnalysisAdmissionError: class AnalysisAdmissionError extends Error {},
+  AnalysisCancelledError: class AnalysisCancelledError extends Error {},
+  AnalysisInputError: class AnalysisInputError extends Error {},
   analyzeImage: vi.fn(),
+  cancelAnalysisJob: vi.fn(),
+  discardAnalysisResult: vi.fn(),
   getAnalysisCacheTelemetry: vi.fn(),
   getAnalysisJob: vi.fn(),
   getAnalysisResult: vi.fn(),
@@ -11,7 +15,7 @@ vi.mock("../imageAnalysis", () => ({
   startAnalysisJob: vi.fn(),
 }));
 
-import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, getLocalErrorSample, getThresholdedErrorHeatmap, startAnalysisJob } from "../imageAnalysis";
+import { AnalysisAdmissionError, analyzeImage, cancelAnalysisJob, discardAnalysisResult, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, getLocalErrorSample, getThresholdedErrorHeatmap, startAnalysisJob } from "../imageAnalysis";
 import { imageAnalysisRouter } from "./imageAnalysis";
 
 const baseInput = {
@@ -25,7 +29,7 @@ const baseInput = {
     segmentationStrategy: "slic" as const,
     hierarchyMethod: "global_energy_merge_tree" as const,
     maxAgglomerationIterations: 2048,
-    mergeEnergyThreshold: 0,
+    mergeEnergyThreshold: 0.05,
     mergeEnergyWeights: { distortion: 1, rate: 0.06, boundary: 0.45, shape: 0.18, complexity: 0.12 },
     derivedCutTargetFractions: { region: 0.5, composite: 0.25, entity: 0.1 },
     scaleLevels: [1, 2, 4, 8],
@@ -39,7 +43,6 @@ const baseInput = {
     boundaryGradientPercentile: 99,
     topology: "4-neighbour" as const,
     graphK: 3,
-    mergeThreshold: 0.58,
     edgeBarrierThreshold: 0.70,
     maxEntityAreaFraction: 0.72,
     complexityMergePenalty: 0.35,
@@ -137,5 +140,16 @@ describe("imageAnalysis router", () => {
     await expect(adminCaller.cacheTelemetry()).resolves.toEqual(telemetry);
     expect(getAnalysisCacheTelemetry).toHaveBeenCalledTimes(1);
     await expect(userCaller.cacheTelemetry()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("cancels and discards only owner-scoped analysis lifecycle records", async () => {
+    const cancelled = { jobId: "job-123", ownerId: "1", status: "cancelled", stage: "cancelled", percent: 31, message: "Analysis was cancelled before completion.", createdAt: 1, updatedAt: 2, completedAt: 2, error: null, resultAvailable: false };
+    vi.mocked(cancelAnalysisJob).mockResolvedValue(cancelled);
+    vi.mocked(discardAnalysisResult).mockResolvedValue(true);
+    const owner = imageAnalysisRouter.createCaller(userContext);
+    await expect(owner.cancel({ jobId: "job-123" })).resolves.toMatchObject({ status: "cancelled" });
+    await expect(owner.discard({ jobId: "job-123" })).resolves.toEqual({ jobId: "job-123", discarded: true });
+    expect(cancelAnalysisJob).toHaveBeenCalledWith("job-123", "1");
+    expect(discardAnalysisResult).toHaveBeenCalledWith("job-123", "1");
   });
 });

@@ -66,6 +66,30 @@ def collect_artifact_storage(output_dir: Path) -> Dict[str, Any]:
     return {"schema": "ArtifactStorage@0.5", "basis": "actual_emitted_file_bytes", "files": files, "totalBytes": int(sum(files.values()))}
 
 
+def canonicalize_relationships(relationships: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Emit one deterministic edge payload for equivalent derived-cut graph records.
+
+    Region/composite/entity cuts may resolve to the same node IDs when a tree is
+    shallow. Their graph evidence is then identical and belongs to several views,
+    not several independent edges. Preserve that view membership instead of
+    serializing duplicate edge payloads.
+    """
+    canonical: Dict[str, Dict[str, Any]] = {}
+    for relationship in relationships:
+        record = dict(relationship)
+        views = sorted(set(record.pop("derivedCutViews", [])))
+        key = json.dumps(record, sort_keys=True, separators=(",", ":"))
+        existing = canonical.get(key)
+        if existing is None:
+            if views:
+                record["derivedCutViews"] = views
+            canonical[key] = record
+            continue
+        if views:
+            existing["derivedCutViews"] = sorted(set(existing.get("derivedCutViews", [])) | set(views))
+    return list(canonical.values())
+
+
 def validate_representation(entities: List[Dict[str, Any]], masks: Dict[str, np.ndarray], root_id: str) -> Dict[str, Any]:
     entity_by_id = {entity["id"]: entity for entity in entities}; non_root = [entity for entity in entities if entity["id"] != root_id]
     connected = 0; area_errors: List[float] = []; cycles = 0
@@ -169,12 +193,14 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any], prog
     report("merge_tree", 65, "Constructed the deterministic global energy merge tree and derived cuts.")
 
     relationship_started = time.perf_counter(); relationships = build_relationships(micro_regions, masks, base_adjacency, (height, width), config, shared_boundaries)
-    for level_entities in (regions, composites, entities_level):
-        relationships.extend(build_relationships(level_entities, masks, set(), (height, width), config))
+    for view, level_entities in (("region", regions), ("composite", composites), ("entity", entities_level)):
+        for relationship in build_relationships(level_entities, masks, set(), (height, width), config):
+            relationship["derivedCutViews"] = [view]
+            relationships.append(relationship)
     for entity in all_entities:
         for child_id in entity["children"]:
             relationships.append(containment_edge(entity, next(child for child in all_entities if child["id"] == child_id)))
-    relationships.extend(cross_scale); relationships.extend(cross_scale_overlaps); profile["relationshipConstructionMs"] = rounded((time.perf_counter() - relationship_started) * 1000, 3)
+    relationships.extend(cross_scale); relationships.extend(cross_scale_overlaps); relationships = canonicalize_relationships(relationships); profile["relationshipConstructionMs"] = rounded((time.perf_counter() - relationship_started) * 1000, 3)
     write_relationship_overlay(rgb, micro_regions, [edge for edge in relationships if edge.get("entityLevel") == 1], overlays_dir / "relationship-graph.png")
     write_relationship_overlay(rgb, micro_regions, [edge for edge in relationships if edge.get("entityLevel") == 1], overlays_dir / "normalized-distance-graph.png", True)
     report("relationship_graph", 74, "Built sparse relationship graphs and hierarchy evidence.")

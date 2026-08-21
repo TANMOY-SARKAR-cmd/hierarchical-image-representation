@@ -76,6 +76,7 @@ type Relationship = {
 type EdgeFilter = { relationshipTypes: string[]; adjacentOnly: boolean; minimumConfidence: number; maximumNormalizedDistance: number };
 type Representation = {
   image: { width: number; height: number; sourceBytes: number };
+  configuration?: { segmentationStrategy?: "slic" | "watershed" | "felzenszwalb"; reconstructionProfile?: "fast" | "balanced" | "accurate"; mergeEnergyThreshold?: number };
   entities: Entity[];
   relationships: Relationship[];
   metrics: { mse: number; psnr: number; ssim: number; processingTimeMs: number; representationBytes: number; representationOverhead: number };
@@ -95,7 +96,7 @@ type Representation = {
   parameterSensitivity?: { schema: string; design: string; interpretation: string; records: Array<{ label: string; entityCountByType: Record<string, number>; relationshipCount: number; quality: { psnr: number; ssim: number; processingTimeMs: number }; artifactStorageBytes: number }> } | null;
 };
 type CacheRetentionTelemetry = { scope: "process_local_aggregate"; activeEntries: number; capacity: number; ttlMs: number; fillRatio: number; writes: number; lookups: number; hits: number; misses: number; hitRate: number; expiredEvictions: number; capacityEvictions: number; totalEvictions: number; processStartedAt: number; lastActivityAt: number | null };
-type AnalysisJobStatus = { jobId: string; status: "queued" | "running" | "uploading" | "completed" | "failed"; stage: string; percent: number; message: string; createdAt: number; updatedAt: number; completedAt: number | null; error: string | null; resultAvailable: boolean };
+type AnalysisJobStatus = { jobId: string; status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled"; stage: string; percent: number; message: string; createdAt: number; updatedAt: number; completedAt: number | null; error: string | null; resultAvailable: boolean };
 
 const overlays = [
   { id: "none", label: "Native source" },
@@ -172,40 +173,33 @@ function TreeNode({ entity, entities, selectedId, onSelect, depth = 0 }: { entit
   const [expanded, setExpanded] = useState(depth < 2);
   const children = entity.children.map(id => entities.get(id)).filter((item): item is Entity => Boolean(item));
   return (
-    <div>
+    <div role="treeitem" aria-level={depth + 1} aria-selected={selectedId === entity.id} aria-expanded={children.length ? expanded : undefined}>
+      <div className="flex items-center" style={{ paddingLeft: `${8 + depth * 14}px` }}>
+        {children.length ? (
+          <button
+            type="button"
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${entity.type.replace("_", " ")}`}
+            aria-expanded={expanded}
+            onClick={() => setExpanded(value => !value)}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded text-slate-500 transition-colors hover:bg-white/8 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-300"
+          >
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
+        ) : <span className="w-7 shrink-0" aria-hidden="true" />}
       <button
         type="button"
         onClick={() => onSelect(entity.id)}
         className={cn(
-          "group flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+          "group flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-300",
           selectedId === entity.id ? "bg-cyan-400/15 text-cyan-100 ring-1 ring-cyan-300/30" : "text-slate-300 hover:bg-white/5"
         )}
-        style={{ paddingLeft: `${8 + depth * 14}px` }}
       >
-        {children.length ? (
-          <span
-            role="button"
-            tabIndex={0}
-            className="grid h-4 w-4 shrink-0 place-items-center text-slate-500"
-            onClick={event => {
-              event.stopPropagation();
-              setExpanded(value => !value);
-            }}
-            onKeyDown={event => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.stopPropagation();
-                setExpanded(value => !value);
-              }
-            }}
-          >
-            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-          </span>
-        ) : <span className="h-4 w-4 shrink-0" />}
         <span className="rounded bg-white/6 px-1.5 py-0.5 font-mono text-[10px] uppercase text-slate-400">L{entity.level}</span>
         <span className="truncate font-medium">{entity.type.replace("_", " ")}</span>
         <span className="ml-auto font-mono text-[10px] text-slate-500">{entity.geometry.area}</span>
       </button>
-      {expanded && children.map(child => <TreeNode key={child.id} entity={child} entities={entities} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />)}
+      </div>
+      {expanded && children.length ? <div role="group">{children.map(child => <TreeNode key={child.id} entity={child} entities={entities} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />)}</div> : null}
     </div>
   );
 }
@@ -319,16 +313,18 @@ export default function Home() {
   const [reportedFailureJobId, setReportedFailureJobId] = useState<string | null>(null);
   const pairedErrorHeatmapUrl = artifacts?.errors.byReconstruction?.[reconstructionLevel] ?? null;
   const startMutation = trpc.imageAnalysis.start.useMutation();
+  const cancelMutation = trpc.imageAnalysis.cancel.useMutation();
+  const discardMutation = trpc.imageAnalysis.discard.useMutation();
   const statusQuery = trpc.imageAnalysis.status.useQuery({ jobId: activeJobId ?? "pending-job" }, { enabled: Boolean(activeJobId), refetchInterval: query => {
     const status = query.state.data as AnalysisJobStatus | undefined;
-    return status?.status === "completed" || status?.status === "failed" ? false : 850;
+    return status?.status === "completed" || status?.status === "failed" || status?.status === "cancelled" ? false : 850;
   }, refetchOnWindowFocus: false, retry: false });
   const jobStatus = statusQuery.data as AnalysisJobStatus | undefined;
   const resultQuery = trpc.imageAnalysis.result.useQuery({ jobId: activeJobId ?? "pending-job" }, { enabled: Boolean(activeJobId && jobStatus?.resultAvailable), refetchOnWindowFocus: false, retry: false });
   const thresholdedHeatmapQuery = trpc.imageAnalysis.thresholdedHeatmap.useQuery({ jobId: activeJobId ?? "pending-job", mode: reconstructionLevel, thresholdDelta: debouncedErrorThresholdDelta }, { enabled: Boolean(activeJobId && showErrorHeatmap && pairedErrorHeatmapUrl), refetchOnWindowFocus: false, retry: false });
   const inspectedErrorCoordinate = pinnedErrorCoordinate ?? hoverErrorCoordinate;
   const localErrorQuery = trpc.imageAnalysis.localError.useQuery({ jobId: activeJobId ?? "pending-job", mode: reconstructionLevel, x: inspectedErrorCoordinate?.x ?? 0, y: inspectedErrorCoordinate?.y ?? 0 }, { enabled: Boolean(activeJobId && pairedErrorHeatmapUrl && inspectedErrorCoordinate), refetchOnWindowFocus: false, retry: false });
-  const isAnalyzing = startMutation.isPending || Boolean(jobStatus && jobStatus.status !== "completed" && jobStatus.status !== "failed");
+  const isAnalyzing = startMutation.isPending || Boolean(jobStatus && jobStatus.status !== "completed" && jobStatus.status !== "failed" && jobStatus.status !== "cancelled");
   const telemetryQuery = trpc.imageAnalysis.cacheTelemetry.useQuery(undefined, { enabled: isAdmin, refetchInterval: isAdmin ? 15_000 : false, refetchOnWindowFocus: false });
 
   const entities = useMemo(() => new Map((representation?.entities ?? []).map(entity => [entity.id, entity])), [representation]);
@@ -470,7 +466,7 @@ export default function Home() {
           segmentationStrategy,
           hierarchyMethod: "global_energy_merge_tree",
           maxAgglomerationIterations: 2048,
-          mergeEnergyThreshold: 0,
+          mergeEnergyThreshold: 0.05,
           mergeEnergyWeights: { distortion: 1, rate: 0.06, boundary: 0.45, shape: 0.18, complexity: 0.12 },
           derivedCutTargetFractions: { region: 0.5, composite: 0.25, entity: 0.1 },
           scaleLevels,
@@ -484,7 +480,6 @@ export default function Home() {
           boundaryGradientPercentile: 99,
           topology: "4-neighbour",
           graphK: 3,
-          mergeThreshold: 0.58,
           edgeBarrierThreshold: 0.70,
           maxEntityAreaFraction: 0.72,
           complexityMergePenalty: 0.35,
@@ -510,6 +505,27 @@ export default function Home() {
     }
   }
 
+  async function cancelAnalysis() {
+    if (!activeJobId) return;
+    try {
+      await cancelMutation.mutateAsync({ jobId: activeJobId });
+      toast.success("Analysis cancelled. No completed result was retained.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The analysis could not be cancelled.");
+    }
+  }
+
+  async function discardAnalysis() {
+    if (!activeJobId) return;
+    try {
+      await discardMutation.mutateAsync({ jobId: activeJobId });
+      setRepresentation(null); setArtifacts(null); setSelectedId(null); setActiveJobId(null); setAppliedResultJobId(null);
+      toast.success("Analysis access was discarded. Artifact references are no longer available through this workbench.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The analysis could not be discarded.");
+    }
+  }
+
   function toggleScale(scale: number) {
     setScaleLevels(current => current.includes(scale) ? current.filter(value => value !== scale) : [...current, scale].sort((a, b) => a - b));
   }
@@ -529,7 +545,7 @@ export default function Home() {
           </div>
           <div className="hidden items-center gap-3 text-right sm:flex">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">analysis profile</div>
-            <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 font-mono text-[10px] text-cyan-200">DETERMINISTIC · SLIC + ENERGY TREE</div>
+            <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 font-mono text-[10px] text-cyan-200">DETERMINISTIC · {(representation?.configuration?.segmentationStrategy ?? segmentationStrategy).toUpperCase()} + ENERGY TREE</div>
           </div>
         </div>
       </header>
@@ -575,6 +591,7 @@ export default function Home() {
               <Button className="h-10 w-full bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={runAnalysis} disabled={!file || isAnalyzing}>
                 {isAnalyzing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {jobStatus?.stage.replace(/_/g, " ") ?? "Starting analysis…"}</> : <><Sparkles className="mr-2 h-4 w-4" /> Run analysis</>}
               </Button>
+              {isAnalyzing ? <Button type="button" variant="outline" size="sm" onClick={cancelAnalysis} disabled={cancelMutation.isPending} className="h-9 w-full border-amber-300/25 bg-amber-300/[0.04] font-mono text-[10px] text-amber-100 hover:bg-amber-300/[0.10]">Cancel analysis</Button> : null}
             </div>
           </section>
 
@@ -608,7 +625,7 @@ export default function Home() {
           </section>
         </section>
 
-        <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+        <aside className="hidden space-y-4 xl:sticky xl:top-4 xl:self-start xl:block">
           {isAdmin ? <RuntimeTelemetryPanel telemetry={telemetryQuery.data as CacheRetentionTelemetry | undefined} isLoading={telemetryQuery.isLoading} /> : null}
           <MergeTreePanel representation={representation} selectedEntity={selectedEntity} activeCut={activeHierarchyCut} onCutChange={setActiveHierarchyCut} onSelect={setSelectedId} />
           <V03InspectionPanels representation={representation} selectedEntity={selectedEntity} />

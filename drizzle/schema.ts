@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -25,4 +25,17 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+export const analysisManifests = mysqlTable("analysisManifests", {
+  jobId: varchar("jobId", { length: 64 }).primaryKey(),
+  ownerId: varchar("ownerId", { length: 64 }).notNull(),
+  status: mysqlEnum("status", ["queued", "running", "uploading", "completed", "failed", "cancelled", "discarded"]).notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  completedAt: timestamp("completedAt"),
+  discardedAt: timestamp("discardedAt"),
+  error: text("error"),
+  payload: mediumtext("payload"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AnalysisManifest = typeof analysisManifests.$inferSelect;

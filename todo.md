@@ -128,3 +128,9 @@
 - [x] Add Python, server, and workbench regressions for exact sampling, thresholding, owner isolation, legend semantics, and no-mode-mutation behavior.
 - [x] Add dedicated protected local-error and thresholded-heatmap API regressions for owner isolation and invalid coordinate or threshold rejection.
 - [x] Validate, checkpoint, synchronize, and deliver the interactive local ΔRGB heatmap enhancement.
+- [x] Calibrate default merge acceptance so eligible fixtures produce nontrivial energy-tree evidence while boundary guards remain effective.
+- [x] Emit canonical unique relationship records across derived cuts and remove inactive public configuration semantics.
+- [x] Clarify reconstruction-mode objectives and recommendations while preserving server-only exact ΔRGB inspection.
+- [x] Add persisted owner-scoped analysis manifests, bounded artifact-reference lifecycle, preflight admission, cancellation, and accurate job failure states.
+- [x] Redesign the workbench with task-prioritized Essentials/Fidelity/Research controls, truthful run status, accessible hierarchy navigation, and compact mobile progressive disclosure.
+- [x] Add remediation regressions, update documentation, validate, checkpoint, synchronize, and deliver the audit-driven release.

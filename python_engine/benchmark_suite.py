@@ -30,7 +30,7 @@ DEFAULT_CONFIG = {
     "segmentationStrategy": "slic",
     "hierarchyMethod": "global_energy_merge_tree",
     "maxAgglomerationIterations": 2048,
-    "mergeEnergyThreshold": 0.0,
+    "mergeEnergyThreshold": 0.05,
     "mergeEnergyWeights": {"distortion": 1.0, "rate": 0.06, "boundary": 0.45, "shape": 0.18, "complexity": 0.12},
     "derivedCutTargetFractions": {"region": 0.50, "composite": 0.25, "entity": 0.10},
     "scaleLevels": [1, 2, 4, 8],
