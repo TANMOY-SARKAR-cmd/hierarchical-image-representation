@@ -71,4 +71,4 @@
 - [x] Reject unsupported direct-engine segmentation strategies instead of silently falling back to SLIC.
 - [x] Add bounded TTL and capacity eviction to in-memory completed analysis results.
 - [x] Revoke the previous source-preview object URL immediately when the user replaces a file.
-- [ ] Add regression coverage, validate, document, checkpoint, synchronize, and deliver all seven QA repairs.
+- [x] Add regression coverage, validate, document, checkpoint, synchronize, and deliver all seven QA repairs.
