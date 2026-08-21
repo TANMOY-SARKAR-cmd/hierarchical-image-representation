@@ -48,11 +48,13 @@ def segment_felzenszwalb(rgb: np.ndarray, requested_segments: int, compactness: 
 
 def segment_image(rgb: np.ndarray, strategy: str, requested_segments: int, compactness: float, minimum_pixels: int) -> np.ndarray:
     selected = str(strategy).lower()
+    if selected == "slic":
+        return segment_slic(rgb, requested_segments, compactness, minimum_pixels)
     if selected == "watershed":
         return segment_watershed(rgb, requested_segments, compactness, minimum_pixels)
     if selected == "felzenszwalb":
         return segment_felzenszwalb(rgb, requested_segments, compactness, minimum_pixels)
-    return segment_slic(rgb, requested_segments, compactness, minimum_pixels)
+    raise ValueError(f"Unsupported segmentation strategy: {strategy}. Expected one of: slic, watershed, felzenszwalb.")
 
 
 def label_adjacency(labels: np.ndarray) -> Set[Tuple[int, int]]:

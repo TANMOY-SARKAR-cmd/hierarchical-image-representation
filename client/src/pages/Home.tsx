@@ -22,7 +22,7 @@ import {
   TreePine,
   UploadCloud,
 } from "lucide-react";
-import React, { ChangeEvent, useEffect, useMemo, useState } from "react";
+import React, { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 type Geometry = { boundingBox: number[]; centroid: number[]; area: number; perimeter: number; orientation: number; compactness: number };
@@ -228,6 +228,7 @@ function SegmentationDiagnosticsPanel({ representation }: { representation: Repr
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
+  const sourceUrlRef = useRef<string | null>(null);
   const [representation, setRepresentation] = useState<Representation | null>(null);
   const [artifacts, setArtifacts] = useState<{ representationJson: string; featuresNpz: string; residualsNpz?: string; reconstructedPng: string; svg: string; overlays: Record<string, string>; reconstructions: Record<string, string>; errors: Record<string, string> } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -268,8 +269,8 @@ export default function Home() {
   const siblings = useMemo(() => selectedEntity?.parentId ? (entities.get(selectedEntity.parentId)?.children ?? []).filter(id => id !== selectedEntity.id) : [], [entities, selectedEntity]);
 
   useEffect(() => () => {
-    if (sourceUrl) URL.revokeObjectURL(sourceUrl);
-  }, [sourceUrl]);
+    if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
+  }, []);
 
   function changeFile(event: ChangeEvent<HTMLInputElement>) {
     const incoming = event.target.files?.[0] ?? null;
@@ -290,7 +291,10 @@ export default function Home() {
     setAdjacentOnly(false);
     setMinimumConfidence(0);
     setMaximumNormalizedDistance(1);
-    setSourceUrl(URL.createObjectURL(incoming));
+    if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
+    const nextSourceUrl = URL.createObjectURL(incoming);
+    sourceUrlRef.current = nextSourceUrl;
+    setSourceUrl(nextSourceUrl);
   }
 
   async function runAnalysis() {
@@ -317,7 +321,6 @@ export default function Home() {
           slicSegments,
           slicCompactness: compactness,
           minimumRegionPixels: 12,
-          hierarchyGroupSize: 3,
           runScaleConsistency: true,
           maxConsistencyPixels: 786432,
           graphK: 3,

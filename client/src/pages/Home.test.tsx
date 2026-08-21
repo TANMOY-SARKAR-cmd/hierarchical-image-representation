@@ -75,6 +75,14 @@ describe("Hierarchy workbench UI", () => {
     expect(filterRelationships(relationships, { relationshipTypes: [], adjacentOnly: true, minimumConfidence: 0, maximumNormalizedDistance: 1 })).toEqual([relationships[0]]);
   });
 
+  it("revokes the previously owned source-preview URL before replacing a selected file", () => {
+    const view = render(<Home />);
+    const fileInput = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(["first"], "first.png", { type: "image/png" })] } });
+    fireEvent.change(fileInput, { target: { files: [new File(["second"], "second.png", { type: "image/png" })] } });
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:fixture");
+  });
+
   it("applies interactive edge controls and resets the filtered graph", async () => {
     processMutation.mutateAsync.mockResolvedValue(completedResult);
     const view = render(<Home />);

@@ -115,14 +115,24 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     _, _, base_labels, micro_regions, masks, label_by_id = scale_data[1]
     base_adjacency, shared_boundaries = graph_edges_for_labels(label_by_id, base_labels)
 
-    correspondence_started = time.perf_counter(); scale_by_factor = {item["resolutionFactor"]: item for item in scales}; cross_scale: List[Dict[str, Any]] = []
-    for factor in config["scaleLevels"]:
-        if factor == 1:
-            continue
-        _, _, _, coarse_entities, coarse_masks, _ = scale_data[factor]
-        links = match_scales(micro_regions, masks, coarse_entities, coarse_masks, factor, (height, width))
-        scale_by_factor[1]["crossScaleLinks"].extend(links); cross_scale.extend(links)
-    profile["crossScaleCorrespondenceMs"] = rounded((time.perf_counter() - correspondence_started) * 1000, 3)
+    scale_by_factor = {item["resolutionFactor"]: item for item in scales}; cross_scale: List[Dict[str, Any]] = []
+    image_pixels = height * width
+    if not config.get("runScaleConsistency", True):
+        correspondence_status = "disabled"
+        profile["crossScaleCorrespondenceMs"] = 0.0
+    elif image_pixels > int(config["maxConsistencyPixels"]):
+        correspondence_status = "skipped_pixel_limit"
+        profile["crossScaleCorrespondenceMs"] = 0.0
+    else:
+        correspondence_status = "completed"
+        correspondence_started = time.perf_counter()
+        for factor in config["scaleLevels"]:
+            if factor == 1:
+                continue
+            _, _, _, coarse_entities, coarse_masks, _ = scale_data[factor]
+            links = match_scales(micro_regions, masks, coarse_entities, coarse_masks, factor, (height, width))
+            scale_by_factor[1]["crossScaleLinks"].extend(links); cross_scale.extend(links)
+        profile["crossScaleCorrespondenceMs"] = rounded((time.perf_counter() - correspondence_started) * 1000, 3)
 
     hierarchy_started = time.perf_counter()
     regions = graph_group_level(micro_regions, masks, rgb, base_fields, "region", 2, config, 1.0)
@@ -173,7 +183,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
 
     validity = validate_representation(all_entities, masks, root["id"])
     correspondence_summary = {
-        "status": "completed" if config.get("runScaleConsistency", True) else "disabled",
+        "status": correspondence_status,
         "correspondenceMethod": "Hungarian IoU/centroid/appearance/area cost",
         "matchedEntityCount": len(cross_scale),
         "centroidStability": rounded(float(np.mean([item["centroidDistance"] for item in cross_scale])) if cross_scale else 0.0, 8),

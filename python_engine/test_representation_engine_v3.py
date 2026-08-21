@@ -9,7 +9,9 @@ from PIL import Image
 from engine import analyze
 from graph import relationship_for
 from geometry import make_entity
+from hierarchy import graph_group_level
 from schema import SCHEMA_VERSION, read_compatible_representation
+from segmentation import segment_image
 
 
 class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
@@ -101,6 +103,38 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
     def test_compatibility_reader_accepts_v02_without_mutating_its_history(self):
         payload = {"representation_version": "0.2.0", "entities": [], "relationships": [], "hierarchy": {}}
         self.assertEqual(read_compatible_representation(payload)["compatibility"], "legacy-v0.2")
+
+    def test_cross_scale_matching_honors_disable_and_pixel_ceiling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory); image = np.zeros((32, 48, 3), dtype=np.uint8); image[:, :24] = [40, 120, 220]; image[:, 24:] = [220, 120, 40]
+            source = workspace / "fixture.png"; Image.fromarray(image).save(source)
+            disabled = json.loads(Path(analyze(source, workspace / "disabled", {"maxImagePixels": 10_000, "scaleLevels": [1, 2], "slicSegments": 16, "minimumRegionPixels": 2, "runScaleConsistency": False})["representationPath"]).read_text())
+            limited = json.loads(Path(analyze(source, workspace / "limited", {"maxImagePixels": 10_000, "scaleLevels": [1, 2], "slicSegments": 16, "minimumRegionPixels": 2, "runScaleConsistency": True, "maxConsistencyPixels": 64})["representationPath"]).read_text())
+            for payload, status in ((disabled, "disabled"), (limited, "skipped_pixel_limit")):
+                self.assertEqual(payload["scale_consistency"]["status"], status)
+                self.assertEqual(payload["scale_correspondence"]["links"], [])
+                self.assertTrue(all(not item["crossScaleLinks"] for item in payload["scales"]))
+                self.assertEqual(payload["profiling"]["crossScaleCorrespondenceMs"], 0.0)
+
+    def test_edge_barrier_blocks_strong_boundary_merges_and_invalid_segmentation_fails(self):
+        from features import extract_features
+        from schema import resolved_config
+
+        image = np.full((12, 16, 3), 120, dtype=np.uint8)
+        base_config = resolved_config({"minimumRegionPixels": 1, "mergeThreshold": 0.1, "maxEntityAreaFraction": 1.0, "edgeBarrierThreshold": 0.25})
+        _, fields = extract_features(image, base_config); fields["edge_strength"][:] = 1.0
+        first_mask = np.zeros((12, 16), dtype=bool); first_mask[:, :8] = True; second_mask = ~first_mask
+        children = [make_entity("first", "micro_region", 1, 1, first_mask, image, fields), make_entity("second", "micro_region", 1, 1, second_mask, image, fields)]
+        masks = {"first": first_mask, "second": second_mask}
+        blocked = graph_group_level(children, masks, image, fields, "region", 2, base_config, 1.0)
+        self.assertEqual(len(blocked), 2)
+        self.assertTrue(all(item["lineage"]["operation"] == "carry" for item in blocked))
+        permitted = graph_group_level(children, masks, image, fields, "region", 2, {**base_config, "edgeBarrierThreshold": 1.0}, 1.0)
+        self.assertEqual(len(permitted), 1)
+        self.assertEqual(permitted[0]["lineage"]["mergeEvidence"]["boundaryEdgeStrength"], 1.0)
+        self.assertEqual(permitted[0]["lineage"]["mergeEvidence"]["edgeBarrierThreshold"], 1.0)
+        with self.assertRaisesRegex(ValueError, "Unsupported segmentation strategy"):
+            segment_image(image, "felzenzwalb", 16, 10, 1)
 
 
 if __name__ == "__main__":

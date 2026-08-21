@@ -38,11 +38,14 @@ The residual stage is optional, deterministic, and budget-bounded. Quantization 
 
 ## Segmentation and Diagnostics
 
-The configured primary segmentation strategy is recorded in the resolved configuration. Native analyses can use `slic`, `watershed`, or `felzenszwalb`; all label fields are relabelled and small regions are deterministically merged before graph construction. When `compareSegmentationBaselines` is enabled, `segmentationDiagnostics` records server-computed summaries for each strategy, including requested segment count, actual entity count, and mean boundary edge strength.
+The configured primary segmentation strategy is recorded in the resolved configuration. Native analyses can use `slic`, `watershed`, or `felzenszwalb`; all label fields are relabelled and small regions are deterministically merged before graph construction. Unsupported direct-engine strategy names are rejected rather than silently falling back to SLIC. When `compareSegmentationBaselines` is enabled, `segmentationDiagnostics` records server-computed summaries for each strategy, including requested segment count, actual entity count, and mean boundary edge strength.
 
 | Configuration field | Default | Effect |
 |---|---:|---|
 | `segmentationStrategy` | `slic` | Selects the primary deterministic partitioning method |
+| `runScaleConsistency` | `true` | Enables the optional cross-resolution correspondence experiment; it does not remove normal multi-scale artifacts |
+| `maxConsistencyPixels` | `786432` | Skips correspondence when the native image exceeds this pixel ceiling |
+| `edgeBarrierThreshold` | `0.70` | Blocks a graph-hierarchy merge when measured contact-boundary edge strength exceeds this value |
 | `reconstructionProfile` | `balanced` | Sets a named fidelity/resource profile for the run |
 | `appearanceModelCandidates` | constant, affine, quadratic | Limits eligible local-Lab model families |
 | `modelPenalty` | `0.00045` | Penalizes unnecessary appearance-model parameters |
@@ -51,6 +54,12 @@ The configured primary segmentation strategy is recorded in the resolved configu
 | `residualQuantization` | `4` | Sets residual quantization step |
 | `residualBudgetBytes` | `196608` | Caps residual-detail storage |
 | `rateDistortionLambda` | `0.0015` | Weighs rate against distortion in mode scoring |
+
+Graph agglomeration is a deterministic, adjacency-constrained **pairwise** process. The historical fixed-size `hierarchyGroupSize` setting is not part of the v0.4 request contract. A candidate pair must satisfy affinity, connectedness, area, and edge-barrier checks before it is merged; accepted parent lineage records the applied merge affinity, measured boundary edge strength, and barrier threshold.
+
+## Cross-Scale Correspondence Limits
+
+Multi-scale features, entities, and reconstruction artifacts are generated for every configured scale independently of the correspondence experiment. `scale_consistency.status` is `completed` only when matching runs; it is `disabled` when `runScaleConsistency` is false and `skipped_pixel_limit` when the native image exceeds `maxConsistencyPixels`. Disabled or limited runs emit no `scale_correspondence.links`, retain empty `crossScaleLinks` arrays, and record zero correspondence timing.
 
 ## Artifacts and Error Inspection
 
@@ -73,6 +82,10 @@ For a reconstruction mode `m`, the stored rate-distortion score is `RD(m) = dist
 ## Compatibility
 
 `read_compatible_representation` accepts v0.2.0, v0.3.0, and v0.4.0 artifacts without mutating historical results. New analyses emit v0.4.0. Consumers should treat `appearanceModel`, `segmentationDiagnostics`, `reconstruction_metadata.rateDistortion`, and `residuals.npz` as v0.4 additions, while preserving the v0.3 hierarchy and relationship fields for compatible inspection.
+
+## Completed-Result Retention
+
+Completed result metadata is held in the server process only for interactive inspection. The default retention policy is a 30-minute TTL and a 100-result oldest-first capacity. `ANALYSIS_RESULT_TTL_MS` and `ANALYSIS_RESULT_CACHE_CAPACITY` may override these values when set to positive integers. Expired or evicted result metadata returns the existing not-found response; immutable exported artifacts remain available through their storage URLs.
 
 ## Privacy, Limitations, and Deferred Work
 

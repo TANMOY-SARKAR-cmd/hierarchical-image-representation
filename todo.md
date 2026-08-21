@@ -65,3 +65,10 @@
 - [x] Add deterministic tests and benchmark coverage for models, residuals, segmentation strategies, quality metrics, and compatibility.
 - [x] Document the v0.4 reconstruction methodology, private-fixture policy, limitations, and deferred non-deterministic methods.
 - [x] Validate, checkpoint, synchronize, and deliver the advanced reconstruction-fidelity upgrade.
+- [x] Gate cross-scale matching on `runScaleConsistency` and `maxConsistencyPixels` while preserving normal multi-scale artifacts.
+- [x] Remove the inactive v0.4 `hierarchyGroupSize` option from public contracts, client requests, tests, and documentation.
+- [x] Apply `edgeBarrierThreshold` to prevent graph-hierarchy merges across strong measured boundaries.
+- [x] Reject unsupported direct-engine segmentation strategies instead of silently falling back to SLIC.
+- [x] Add bounded TTL and capacity eviction to in-memory completed analysis results.
+- [x] Revoke the previous source-preview object URL immediately when the user replaces a file.
+- [ ] Add regression coverage, validate, document, checkpoint, synchronize, and deliver all seven QA repairs.

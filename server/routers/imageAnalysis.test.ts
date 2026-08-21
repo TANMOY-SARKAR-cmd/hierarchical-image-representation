@@ -22,7 +22,6 @@ const baseInput = {
     slicSegments: 72,
     slicCompactness: 10,
     minimumRegionPixels: 12,
-    hierarchyGroupSize: 3,
     runScaleConsistency: true,
     maxConsistencyPixels: 786432,
     graphK: 3,

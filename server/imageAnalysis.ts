@@ -15,7 +15,6 @@ export type AnalysisConfig = {
   slicSegments: number;
   slicCompactness: number;
   minimumRegionPixels: number;
-  hierarchyGroupSize: number;
   runScaleConsistency: boolean;
   maxConsistencyPixels: number;
   graphK: number;
@@ -53,7 +52,46 @@ export type AnalysisResult = {
 
 const supportedMimeTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 const supportedExtensions = new Set(["png", "jpg", "jpeg", "webp"]);
-const activeResults = new Map<string, AnalysisResult>();
+const DEFAULT_RESULT_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_RESULT_CACHE_CAPACITY = 100;
+
+function positiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export class AnalysisResultCache {
+  private readonly results = new Map<string, { result: AnalysisResult; storedAt: number }>();
+
+  constructor(private readonly ttlMs: number, private readonly capacity: number) {}
+
+  remember(result: AnalysisResult, now = Date.now()) {
+    this.purge(now);
+    this.results.delete(result.jobId);
+    this.results.set(result.jobId, { result, storedAt: now });
+    while (this.results.size > this.capacity) {
+      const oldest = this.results.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.results.delete(oldest);
+    }
+  }
+
+  get(jobId: string, now = Date.now()) {
+    this.purge(now);
+    return this.results.get(jobId)?.result ?? null;
+  }
+
+  private purge(now: number) {
+    for (const [jobId, entry] of Array.from(this.results.entries())) {
+      if (now - entry.storedAt >= this.ttlMs) this.results.delete(jobId);
+    }
+  }
+}
+
+const activeResults = new AnalysisResultCache(
+  positiveInteger(process.env.ANALYSIS_RESULT_TTL_MS, DEFAULT_RESULT_TTL_MS),
+  positiveInteger(process.env.ANALYSIS_RESULT_CACHE_CAPACITY, DEFAULT_RESULT_CACHE_CAPACITY)
+);
 
 function safeName(fileName: string) {
   const extension = path.extname(fileName).toLowerCase().replace(".", "");
@@ -175,7 +213,7 @@ export async function analyzeImage(input: {
       errors,
     };
     const result = { jobId, representation, artifactUrls };
-    activeResults.set(jobId, result);
+    activeResults.remember(result);
     return result;
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
@@ -183,5 +221,5 @@ export async function analyzeImage(input: {
 }
 
 export function getAnalysisResult(jobId: string) {
-  return activeResults.get(jobId) ?? null;
+  return activeResults.get(jobId);
 }
