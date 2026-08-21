@@ -69,3 +69,21 @@ def overlap_scales(base_entities: List[Dict[str, Any]], base_masks: Dict[str, np
                 "semantics": "fine_to_coarse_overlap_not_hierarchy_containment",
             })
     return links
+
+
+def normalized_overlap_matrix(overlap_links: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarize significant lifted-mask overlaps as sparse, fine-row-normalized matrices."""
+    matrices: List[Dict[str, Any]] = []
+    for factor in sorted({int(link["resolutionFactor"]) for link in overlap_links}):
+        rows: Dict[str, List[Dict[str, Any]]] = {}
+        for link in overlap_links:
+            if int(link["resolutionFactor"]) != factor:
+                continue
+            rows.setdefault(str(link["sourceId"]), []).append({"targetId": link["targetId"], "fineCoverage": link["fineCoverage"], "overlapIoU": link["overlapIoU"]})
+        serialized_rows: List[Dict[str, Any]] = []
+        for source_id in sorted(rows):
+            entries = sorted(rows[source_id], key=lambda item: str(item["targetId"]))
+            coverage = float(sum(float(item["fineCoverage"]) for item in entries))
+            serialized_rows.append({"sourceId": source_id, "coverageSum": rounded(coverage, 8), "uncoveredFraction": rounded(max(0.0, 1.0 - coverage), 8), "entries": entries})
+        matrices.append({"resolutionFactor": factor, "rowCount": len(serialized_rows), "columnCount": len({item["targetId"] for row in serialized_rows for item in row["entries"]}), "rows": serialized_rows})
+    return {"schema": "NormalizedFineToCoarseOverlapMatrix@0.7", "normalization": "each row stores lifted fine-mask coverage for links that meet crossScaleOverlapThreshold; omitted entries are zero", "matrices": matrices}

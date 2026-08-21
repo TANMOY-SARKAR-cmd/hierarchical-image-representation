@@ -1,0 +1,1706 @@
+{
+  "benchmarkVersion": "0.6.0",
+  "codecBaselines": {
+    "PNG": {
+      "available": true,
+      "mode": "Pillow export"
+    },
+    "JPEG": {
+      "available": true,
+      "mode": "Pillow export"
+    },
+    "WebP": {
+      "available": true,
+      "mode": "Pillow export"
+    },
+    "AVIF": {
+      "available": true,
+      "mode": "Pillow capability probe"
+    },
+    "VTracer": {
+      "available": false,
+      "mode": "CLI capability probe"
+    },
+    "SVG": {
+      "available": true,
+      "mode": "engine boundary export"
+    }
+  },
+  "records": [
+    {
+      "category": "geometric_shapes",
+      "provenance": "synthetic",
+      "file": "geometric-shapes.png",
+      "originalDimensions": [
+        128,
+        96
+      ],
+      "analysisDimensions": [
+        128,
+        96
+      ],
+      "dimensions": [
+        128,
+        96
+      ],
+      "pixels": 12288,
+      "entityCountByLevel": {
+        "micro_region": 53,
+        "region": 4,
+        "composite": 4,
+        "entity": 4,
+        "image": 1
+      },
+      "relationshipCount": 326,
+      "representationBytes": 646790,
+      "reconstructionBytes": 761,
+      "quality": {
+        "mse": 0.48931205,
+        "psnr": 51.234944,
+        "ssim": 0.99938192,
+        "processingTimeMs": 1805.802,
+        "representationOverhead": 17.54530165
+      },
+      "reconstructionModes": {
+        "level1": {
+          "mse": 2.46614575,
+          "psnr": 44.210616,
+          "ssim": 0.99932307,
+          "entityCount": 53
+        },
+        "level2": {
+          "mse": 2.47401261,
+          "psnr": 44.196785,
+          "ssim": 0.99936357,
+          "entityCount": 4
+        },
+        "level3": {
+          "mse": 2.47401261,
+          "psnr": 44.196785,
+          "ssim": 0.99936357,
+          "entityCount": 4
+        },
+        "level4": {
+          "mse": 2.47401261,
+          "psnr": 44.196785,
+          "ssim": 0.99936357,
+          "entityCount": 4
+        },
+        "full": {
+          "mse": 2.46614575,
+          "psnr": 44.210616,
+          "ssim": 0.99932307,
+          "entityCount": 53
+        },
+        "constant": {
+          "mse": 2.46614575,
+          "psnr": 44.210616,
+          "ssim": 0.99932307,
+          "entityCount": 53
+        },
+        "parametric": {
+          "mse": 4.6407876,
+          "psnr": 41.464887,
+          "ssim": 0.99763534,
+          "entityCount": 53
+        },
+        "residual": {
+          "mse": 0.48931205,
+          "psnr": 51.234944,
+          "ssim": 0.99938192,
+          "entityCount": 53
+        }
+      },
+      "heuristicRateDistortion": {
+        "basis": "parameter_payload_estimate_not_serialized_storage",
+        "modes": {
+          "constant": {
+            "distortion": 2.46614575,
+            "estimatedBytes": 636,
+            "normalizedRate": 0.05175781,
+            "score": 2.46622339
+          },
+          "parametric": {
+            "distortion": 4.6407876,
+            "estimatedBytes": 636,
+            "normalizedRate": 0.05175781,
+            "score": 4.64086524
+          },
+          "residual": {
+            "distortion": 0.48931205,
+            "estimatedBytes": 4291,
+            "normalizedRate": 0.34920247,
+            "score": 0.48983586
+          }
+        }
+      },
+      "artifactStorage": {
+        "schema": "ArtifactStorage@0.5",
+        "basis": "actual_emitted_file_bytes",
+        "files": {
+          "errors/absolute-error.png": 1231,
+          "errors/parametric-error.png": 868,
+          "errors/per-region-error.png": 1242,
+          "errors/residual-energy.png": 958,
+          "features.npz": 67102,
+          "overlays/brightness.png": 1430,
+          "overlays/complexity.png": 6105,
+          "overlays/edge-strength.png": 1557,
+          "overlays/gradient-x.png": 1615,
+          "overlays/gradient-y.png": 1014,
+          "overlays/normalized-distance-graph.png": 26434,
+          "overlays/relationship-graph.png": 26031,
+          "reconstructed.png": 761,
+          "reconstruction.svg": 45291,
+          "reconstructions/constant.png": 750,
+          "reconstructions/full.png": 750,
+          "reconstructions/level1.png": 750,
+          "reconstructions/level2.png": 693,
+          "reconstructions/level3.png": 693,
+          "reconstructions/level4.png": 693,
+          "reconstructions/parametric.png": 749,
+          "reconstructions/residual.png": 761,
+          "representation.json": 579688,
+          "residuals.npz": 4291
+        },
+        "totalBytes": 771457
+      },
+      "segmentationDiagnostics": {
+        "slic": {
+          "strategy": "slic",
+          "entityCount": 53,
+          "meanBoundaryEdgeStrength": 0.14014688,
+          "requestedSegments": 72
+        },
+        "watershed": {
+          "strategy": "watershed",
+          "entityCount": 70,
+          "meanBoundaryEdgeStrength": 0.04455148,
+          "requestedSegments": 72
+        },
+        "felzenszwalb": {
+          "strategy": "felzenszwalb",
+          "entityCount": 10,
+          "meanBoundaryEdgeStrength": 0.30218068,
+          "requestedSegments": 72
+        }
+      },
+      "residual": {
+        "schema": "QuantizedSparseResidual@0.6",
+        "quantizationStep": 4,
+        "budgetBytes": 196608,
+        "actualEncodedBytes": 4291,
+        "budgetMet": true,
+        "artifactEmitted": true,
+        "noPayloadFitsBudget": false,
+        "candidatePixels": 2766,
+        "coveredPixels": 2766,
+        "coverage": 0.22509766,
+        "selection": "largest_rgb_l1_quantized_residual",
+        "heuristicRateDistortion": {
+          "distortion": 0.48931205,
+          "estimatedBytes": 4291,
+          "normalizedRate": 0.34920247,
+          "score": 0.48983586
+        },
+        "artifact": "residuals.npz"
+      },
+      "codecComparisons": {
+        "PNG": {
+          "available": true,
+          "outputBytes": 698,
+          "runtimeMs": 34.95,
+          "quality": {
+            "mse": 0.0,
+            "psnr": 99.0,
+            "ssim": 1.0
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "JPEG": {
+          "available": true,
+          "outputBytes": 3442,
+          "runtimeMs": 0.939,
+          "quality": {
+            "mse": 51.47523499,
+            "psnr": 31.01482,
+            "ssim": 0.91889496
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "WebP": {
+          "available": true,
+          "outputBytes": 1438,
+          "runtimeMs": 113.343,
+          "quality": {
+            "mse": 51.15074158,
+            "psnr": 31.042284,
+            "ssim": 0.93874278
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "AVIF": {
+          "available": true,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "SVG/VTracer": {
+          "available": false,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "vector if VTracer is installed",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        }
+      }
+    },
+    {
+      "category": "gradients",
+      "provenance": "synthetic",
+      "file": "gradients.png",
+      "originalDimensions": [
+        128,
+        96
+      ],
+      "analysisDimensions": [
+        128,
+        96
+      ],
+      "dimensions": [
+        128,
+        96
+      ],
+      "pixels": 12288,
+      "entityCountByLevel": {
+        "micro_region": 70,
+        "region": 9,
+        "composite": 7,
+        "entity": 5,
+        "image": 1
+      },
+      "relationshipCount": 322,
+      "representationBytes": 999154,
+      "reconstructionBytes": 3095,
+      "quality": {
+        "mse": 1.52690971,
+        "psnr": 46.29267,
+        "ssim": 0.98259849,
+        "processingTimeMs": 1468.623,
+        "representationOverhead": 27.10378689
+      },
+      "reconstructionModes": {
+        "level1": {
+          "mse": 48.16360092,
+          "psnr": 31.303614,
+          "ssim": 0.72691129,
+          "entityCount": 70
+        },
+        "level2": {
+          "mse": 484.15444946,
+          "psnr": 21.280964,
+          "ssim": 0.67688266,
+          "entityCount": 9
+        },
+        "level3": {
+          "mse": 560.83105469,
+          "psnr": 20.642483,
+          "ssim": 0.69165802,
+          "entityCount": 7
+        },
+        "level4": {
+          "mse": 711.38696289,
+          "psnr": 19.609745,
+          "ssim": 0.69517022,
+          "entityCount": 5
+        },
+        "full": {
+          "mse": 48.16360092,
+          "psnr": 31.303614,
+          "ssim": 0.72691129,
+          "entityCount": 70
+        },
+        "constant": {
+          "mse": 48.16360092,
+          "psnr": 31.303614,
+          "ssim": 0.72691129,
+          "entityCount": 70
+        },
+        "parametric": {
+          "mse": 52.91870117,
+          "psnr": 30.894712,
+          "ssim": 0.71839217,
+          "entityCount": 70
+        },
+        "residual": {
+          "mse": 1.52690971,
+          "psnr": 46.29267,
+          "ssim": 0.98259849,
+          "entityCount": 70
+        }
+      },
+      "heuristicRateDistortion": {
+        "basis": "parameter_payload_estimate_not_serialized_storage",
+        "modes": {
+          "constant": {
+            "distortion": 48.16360092,
+            "estimatedBytes": 840,
+            "normalizedRate": 0.06835938,
+            "score": 48.16370346
+          },
+          "parametric": {
+            "distortion": 52.91870117,
+            "estimatedBytes": 840,
+            "normalizedRate": 0.06835938,
+            "score": 52.91880371
+          },
+          "residual": {
+            "distortion": 1.52690971,
+            "estimatedBytes": 21206,
+            "normalizedRate": 1.7257487,
+            "score": 1.52949833
+          }
+        }
+      },
+      "artifactStorage": {
+        "schema": "ArtifactStorage@0.5",
+        "basis": "actual_emitted_file_bytes",
+        "files": {
+          "errors/absolute-error.png": 20989,
+          "errors/parametric-error.png": 28619,
+          "errors/per-region-error.png": 5528,
+          "errors/residual-energy.png": 25813,
+          "features.npz": 327722,
+          "overlays/brightness.png": 13067,
+          "overlays/complexity.png": 36170,
+          "overlays/edge-strength.png": 344,
+          "overlays/gradient-x.png": 12384,
+          "overlays/gradient-y.png": 9374,
+          "overlays/normalized-distance-graph.png": 26281,
+          "overlays/relationship-graph.png": 25550,
+          "reconstructed.png": 3095,
+          "reconstruction.svg": 57941,
+          "reconstructions/constant.png": 1966,
+          "reconstructions/full.png": 1966,
+          "reconstructions/level1.png": 1966,
+          "reconstructions/level2.png": 931,
+          "reconstructions/level3.png": 827,
+          "reconstructions/level4.png": 716,
+          "reconstructions/parametric.png": 2176,
+          "reconstructions/residual.png": 3095,
+          "representation.json": 671432,
+          "residuals.npz": 21206
+        },
+        "totalBytes": 1299158
+      },
+      "segmentationDiagnostics": {
+        "slic": {
+          "strategy": "slic",
+          "entityCount": 70,
+          "meanBoundaryEdgeStrength": 0.0,
+          "requestedSegments": 72
+        },
+        "watershed": {
+          "strategy": "watershed",
+          "entityCount": 70,
+          "meanBoundaryEdgeStrength": 0.0,
+          "requestedSegments": 72
+        },
+        "felzenszwalb": {
+          "strategy": "felzenszwalb",
+          "entityCount": 110,
+          "meanBoundaryEdgeStrength": 0.0,
+          "requestedSegments": 72
+        }
+      },
+      "residual": {
+        "schema": "QuantizedSparseResidual@0.6",
+        "quantizationStep": 4,
+        "budgetBytes": 196608,
+        "actualEncodedBytes": 21206,
+        "budgetMet": true,
+        "artifactEmitted": true,
+        "noPayloadFitsBudget": false,
+        "candidatePixels": 11845,
+        "coveredPixels": 11845,
+        "coverage": 0.96394857,
+        "selection": "largest_rgb_l1_quantized_residual",
+        "heuristicRateDistortion": {
+          "distortion": 1.52690971,
+          "estimatedBytes": 21206,
+          "normalizedRate": 1.7257487,
+          "score": 1.52949833
+        },
+        "artifact": "residuals.npz"
+      },
+      "codecComparisons": {
+        "PNG": {
+          "available": true,
+          "outputBytes": 330,
+          "runtimeMs": 1.04,
+          "quality": {
+            "mse": 0.0,
+            "psnr": 99.0,
+            "ssim": 1.0
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "JPEG": {
+          "available": true,
+          "outputBytes": 1572,
+          "runtimeMs": 0.576,
+          "quality": {
+            "mse": 0.74831814,
+            "psnr": 49.389941,
+            "ssim": 0.9926575
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "WebP": {
+          "available": true,
+          "outputBytes": 408,
+          "runtimeMs": 1.688,
+          "quality": {
+            "mse": 1.51936853,
+            "psnr": 46.314172,
+            "ssim": 0.98596557
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "AVIF": {
+          "available": true,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "SVG/VTracer": {
+          "available": false,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "vector if VTracer is installed",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        }
+      }
+    },
+    {
+      "category": "flat_illustration",
+      "provenance": "synthetic",
+      "file": "flat-illustration.png",
+      "originalDimensions": [
+        128,
+        96
+      ],
+      "analysisDimensions": [
+        128,
+        96
+      ],
+      "dimensions": [
+        128,
+        96
+      ],
+      "pixels": 12288,
+      "entityCountByLevel": {
+        "micro_region": 48,
+        "region": 4,
+        "composite": 4,
+        "entity": 4,
+        "image": 1
+      },
+      "relationshipCount": 299,
+      "representationBytes": 598583,
+      "reconstructionBytes": 639,
+      "quality": {
+        "mse": 0.30948892,
+        "psnr": 53.224352,
+        "ssim": 0.99996701,
+        "processingTimeMs": 1459.324,
+        "representationOverhead": 16.23760308
+      },
+      "reconstructionModes": {
+        "level1": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 48
+        },
+        "level2": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 4
+        },
+        "level3": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 4
+        },
+        "level4": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 4
+        },
+        "full": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 48
+        },
+        "constant": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 48
+        },
+        "parametric": {
+          "mse": 0.30948892,
+          "psnr": 53.224352,
+          "ssim": 0.99996701,
+          "entityCount": 48
+        },
+        "residual": {
+          "mse": 0.30948892,
+          "psnr": 53.224352,
+          "ssim": 0.99996701,
+          "entityCount": 48
+        }
+      },
+      "heuristicRateDistortion": {
+        "basis": "parameter_payload_estimate_not_serialized_storage",
+        "modes": {
+          "constant": {
+            "distortion": 0.0,
+            "estimatedBytes": 576,
+            "normalizedRate": 0.046875,
+            "score": 7.031e-05
+          },
+          "parametric": {
+            "distortion": 0.30948892,
+            "estimatedBytes": 576,
+            "normalizedRate": 0.046875,
+            "score": 0.30955923
+          },
+          "residual": {
+            "distortion": 0.30948892,
+            "estimatedBytes": 0,
+            "normalizedRate": 0.0,
+            "score": 0.30948892
+          }
+        }
+      },
+      "artifactStorage": {
+        "schema": "ArtifactStorage@0.5",
+        "basis": "actual_emitted_file_bytes",
+        "files": {
+          "errors/absolute-error.png": 797,
+          "errors/parametric-error.png": 797,
+          "errors/per-region-error.png": 1016,
+          "errors/residual-energy.png": 406,
+          "features.npz": 64885,
+          "overlays/brightness.png": 1269,
+          "overlays/complexity.png": 5236,
+          "overlays/edge-strength.png": 1380,
+          "overlays/gradient-x.png": 1410,
+          "overlays/gradient-y.png": 932,
+          "overlays/normalized-distance-graph.png": 25627,
+          "overlays/relationship-graph.png": 23616,
+          "reconstructed.png": 639,
+          "reconstruction.svg": 42337,
+          "reconstructions/constant.png": 638,
+          "reconstructions/full.png": 638,
+          "reconstructions/level1.png": 638,
+          "reconstructions/level2.png": 638,
+          "reconstructions/level3.png": 638,
+          "reconstructions/level4.png": 638,
+          "reconstructions/parametric.png": 639,
+          "reconstructions/residual.png": 639,
+          "representation.json": 533698
+        },
+        "totalBytes": 709151
+      },
+      "segmentationDiagnostics": {
+        "slic": {
+          "strategy": "slic",
+          "entityCount": 48,
+          "meanBoundaryEdgeStrength": 0.13389941,
+          "requestedSegments": 72
+        },
+        "watershed": {
+          "strategy": "watershed",
+          "entityCount": 70,
+          "meanBoundaryEdgeStrength": 0.07631258,
+          "requestedSegments": 72
+        },
+        "felzenszwalb": {
+          "strategy": "felzenszwalb",
+          "entityCount": 24,
+          "meanBoundaryEdgeStrength": 0.32544377,
+          "requestedSegments": 72
+        }
+      },
+      "residual": {
+        "schema": "QuantizedSparseResidual@0.6",
+        "quantizationStep": 4,
+        "budgetBytes": 196608,
+        "actualEncodedBytes": 0,
+        "budgetMet": true,
+        "artifactEmitted": false,
+        "noPayloadFitsBudget": false,
+        "candidatePixels": 0,
+        "coveredPixels": 0,
+        "coverage": 0.0,
+        "selection": "largest_rgb_l1_quantized_residual",
+        "heuristicRateDistortion": {
+          "distortion": 0.30948892,
+          "estimatedBytes": 0,
+          "normalizedRate": 0.0,
+          "score": 0.30948892
+        }
+      },
+      "codecComparisons": {
+        "PNG": {
+          "available": true,
+          "outputBytes": 638,
+          "runtimeMs": 0.923,
+          "quality": {
+            "mse": 0.0,
+            "psnr": 99.0,
+            "ssim": 1.0
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "JPEG": {
+          "available": true,
+          "outputBytes": 3367,
+          "runtimeMs": 0.667,
+          "quality": {
+            "mse": 65.32364655,
+            "psnr": 29.980099,
+            "ssim": 0.90345668
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "WebP": {
+          "available": true,
+          "outputBytes": 1316,
+          "runtimeMs": 1.755,
+          "quality": {
+            "mse": 61.33943558,
+            "psnr": 30.253406,
+            "ssim": 0.92155982
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "AVIF": {
+          "available": true,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "SVG/VTracer": {
+          "available": false,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "vector if VTracer is installed",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        }
+      }
+    },
+    {
+      "category": "logo_like",
+      "provenance": "synthetic",
+      "file": "logo-like.png",
+      "originalDimensions": [
+        128,
+        96
+      ],
+      "analysisDimensions": [
+        128,
+        96
+      ],
+      "dimensions": [
+        128,
+        96
+      ],
+      "pixels": 12288,
+      "entityCountByLevel": {
+        "micro_region": 56,
+        "region": 4,
+        "composite": 4,
+        "entity": 4,
+        "image": 1
+      },
+      "relationshipCount": 363,
+      "representationBytes": 677138,
+      "reconstructionBytes": 607,
+      "quality": {
+        "mse": 0.37060547,
+        "psnr": 52.441685,
+        "ssim": 0.99967745,
+        "processingTimeMs": 2099.991,
+        "representationOverhead": 18.36854384
+      },
+      "reconstructionModes": {
+        "level1": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 56
+        },
+        "level2": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 4
+        },
+        "level3": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 4
+        },
+        "level4": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 4
+        },
+        "full": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 56
+        },
+        "constant": {
+          "mse": 0.0,
+          "psnr": 99.0,
+          "ssim": 1.0,
+          "entityCount": 56
+        },
+        "parametric": {
+          "mse": 0.47086588,
+          "psnr": 51.401831,
+          "ssim": 0.99911443,
+          "entityCount": 56
+        },
+        "residual": {
+          "mse": 0.37060547,
+          "psnr": 52.441685,
+          "ssim": 0.99967745,
+          "entityCount": 56
+        }
+      },
+      "heuristicRateDistortion": {
+        "basis": "parameter_payload_estimate_not_serialized_storage",
+        "modes": {
+          "constant": {
+            "distortion": 0.0,
+            "estimatedBytes": 672,
+            "normalizedRate": 0.0546875,
+            "score": 8.203e-05
+          },
+          "parametric": {
+            "distortion": 0.47086588,
+            "estimatedBytes": 672,
+            "normalizedRate": 0.0546875,
+            "score": 0.47094791
+          },
+          "residual": {
+            "distortion": 0.37060547,
+            "estimatedBytes": 1419,
+            "normalizedRate": 0.11547852,
+            "score": 0.37077869
+          }
+        }
+      },
+      "artifactStorage": {
+        "schema": "ArtifactStorage@0.5",
+        "basis": "actual_emitted_file_bytes",
+        "files": {
+          "errors/absolute-error.png": 975,
+          "errors/parametric-error.png": 718,
+          "errors/per-region-error.png": 995,
+          "errors/residual-energy.png": 651,
+          "features.npz": 62932,
+          "overlays/brightness.png": 1085,
+          "overlays/complexity.png": 4103,
+          "overlays/edge-strength.png": 1141,
+          "overlays/gradient-x.png": 1154,
+          "overlays/gradient-y.png": 1097,
+          "overlays/normalized-distance-graph.png": 26069,
+          "overlays/relationship-graph.png": 24517,
+          "reconstructed.png": 607,
+          "reconstruction.svg": 46152,
+          "reconstructions/constant.png": 606,
+          "reconstructions/full.png": 606,
+          "reconstructions/level1.png": 606,
+          "reconstructions/level2.png": 606,
+          "reconstructions/level3.png": 606,
+          "reconstructions/level4.png": 606,
+          "reconstructions/parametric.png": 607,
+          "reconstructions/residual.png": 607,
+          "representation.json": 614206,
+          "residuals.npz": 1419
+        },
+        "totalBytes": 792671
+      },
+      "segmentationDiagnostics": {
+        "slic": {
+          "strategy": "slic",
+          "entityCount": 56,
+          "meanBoundaryEdgeStrength": 0.1314355,
+          "requestedSegments": 72
+        },
+        "watershed": {
+          "strategy": "watershed",
+          "entityCount": 70,
+          "meanBoundaryEdgeStrength": 0.02893309,
+          "requestedSegments": 72
+        },
+        "felzenszwalb": {
+          "strategy": "felzenszwalb",
+          "entityCount": 15,
+          "meanBoundaryEdgeStrength": 0.27504393,
+          "requestedSegments": 72
+        }
+      },
+      "residual": {
+        "schema": "QuantizedSparseResidual@0.6",
+        "quantizationStep": 4,
+        "budgetBytes": 196608,
+        "actualEncodedBytes": 1419,
+        "budgetMet": true,
+        "artifactEmitted": true,
+        "noPayloadFitsBudget": false,
+        "candidatePixels": 462,
+        "coveredPixels": 462,
+        "coverage": 0.03759766,
+        "selection": "largest_rgb_l1_quantized_residual",
+        "heuristicRateDistortion": {
+          "distortion": 0.37060547,
+          "estimatedBytes": 1419,
+          "normalizedRate": 0.11547852,
+          "score": 0.37077869
+        },
+        "artifact": "residuals.npz"
+      },
+      "codecComparisons": {
+        "PNG": {
+          "available": true,
+          "outputBytes": 606,
+          "runtimeMs": 0.894,
+          "quality": {
+            "mse": 0.0,
+            "psnr": 99.0,
+            "ssim": 1.0
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "JPEG": {
+          "available": true,
+          "outputBytes": 2889,
+          "runtimeMs": 0.583,
+          "quality": {
+            "mse": 11.54698372,
+            "psnr": 37.506118,
+            "ssim": 0.96685534
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "WebP": {
+          "available": true,
+          "outputBytes": 1138,
+          "runtimeMs": 1.656,
+          "quality": {
+            "mse": 9.80338573,
+            "psnr": 38.217043,
+            "ssim": 0.97922309
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "AVIF": {
+          "available": true,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "SVG/VTracer": {
+          "available": false,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "vector if VTracer is installed",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        }
+      }
+    },
+    {
+      "category": "pixel_art",
+      "provenance": "synthetic",
+      "file": "pixel-art.png",
+      "originalDimensions": [
+        128,
+        96
+      ],
+      "analysisDimensions": [
+        128,
+        96
+      ],
+      "dimensions": [
+        128,
+        96
+      ],
+      "pixels": 12288,
+      "entityCountByLevel": {
+        "micro_region": 44,
+        "region": 32,
+        "composite": 26,
+        "entity": 8,
+        "image": 1
+      },
+      "relationshipCount": 546,
+      "representationBytes": 959085,
+      "reconstructionBytes": 388,
+      "quality": {
+        "mse": 0.59385848,
+        "psnr": 50.393974,
+        "ssim": 0.99829472,
+        "processingTimeMs": 1512.104,
+        "representationOverhead": 26.0168457
+      },
+      "reconstructionModes": {
+        "level1": {
+          "mse": 0.32674155,
+          "psnr": 52.98876,
+          "ssim": 0.99986264,
+          "entityCount": 44
+        },
+        "level2": {
+          "mse": 150.8996582,
+          "psnr": 26.343921,
+          "ssim": 0.94807551,
+          "entityCount": 32
+        },
+        "level3": {
+          "mse": 321.84301758,
+          "psnr": 23.054363,
+          "ssim": 0.89432223,
+          "entityCount": 26
+        },
+        "level4": {
+          "mse": 3984.90356445,
+          "psnr": 12.126626,
+          "ssim": 0.62535504,
+          "entityCount": 8
+        },
+        "full": {
+          "mse": 0.32674155,
+          "psnr": 52.98876,
+          "ssim": 0.99986264,
+          "entityCount": 44
+        },
+        "constant": {
+          "mse": 0.32674155,
+          "psnr": 52.98876,
+          "ssim": 0.99986264,
+          "entityCount": 44
+        },
+        "parametric": {
+          "mse": 2.78027344,
+          "psnr": 43.689929,
+          "ssim": 0.99651836,
+          "entityCount": 44
+        },
+        "residual": {
+          "mse": 0.59385848,
+          "psnr": 50.393974,
+          "ssim": 0.99829472,
+          "entityCount": 44
+        }
+      },
+      "heuristicRateDistortion": {
+        "basis": "parameter_payload_estimate_not_serialized_storage",
+        "modes": {
+          "constant": {
+            "distortion": 0.32674155,
+            "estimatedBytes": 528,
+            "normalizedRate": 0.04296875,
+            "score": 0.326806
+          },
+          "parametric": {
+            "distortion": 2.78027344,
+            "estimatedBytes": 528,
+            "normalizedRate": 0.04296875,
+            "score": 2.78033789
+          },
+          "residual": {
+            "distortion": 0.59385848,
+            "estimatedBytes": 8992,
+            "normalizedRate": 0.73177083,
+            "score": 0.59495614
+          }
+        }
+      },
+      "artifactStorage": {
+        "schema": "ArtifactStorage@0.5",
+        "basis": "actual_emitted_file_bytes",
+        "files": {
+          "errors/absolute-error.png": 1112,
+          "errors/parametric-error.png": 1533,
+          "errors/per-region-error.png": 1113,
+          "errors/residual-energy.png": 1178,
+          "features.npz": 61218,
+          "overlays/brightness.png": 1980,
+          "overlays/complexity.png": 6113,
+          "overlays/edge-strength.png": 2091,
+          "overlays/gradient-x.png": 1878,
+          "overlays/gradient-y.png": 466,
+          "overlays/normalized-distance-graph.png": 25449,
+          "overlays/relationship-graph.png": 24261,
+          "reconstructed.png": 388,
+          "reconstruction.svg": 35229,
+          "reconstructions/constant.png": 405,
+          "reconstructions/full.png": 405,
+          "reconstructions/level1.png": 405,
+          "reconstructions/level2.png": 424,
+          "reconstructions/level3.png": 446,
+          "reconstructions/level4.png": 421,
+          "reconstructions/parametric.png": 406,
+          "reconstructions/residual.png": 388,
+          "representation.json": 897867,
+          "residuals.npz": 8992
+        },
+        "totalBytes": 1074168
+      },
+      "segmentationDiagnostics": {
+        "slic": {
+          "strategy": "slic",
+          "entityCount": 44,
+          "meanBoundaryEdgeStrength": 0.04780877,
+          "requestedSegments": 72
+        },
+        "watershed": {
+          "strategy": "watershed",
+          "entityCount": 70,
+          "meanBoundaryEdgeStrength": 0.0932768,
+          "requestedSegments": 72
+        },
+        "felzenszwalb": {
+          "strategy": "felzenszwalb",
+          "entityCount": 101,
+          "meanBoundaryEdgeStrength": 0.3489309,
+          "requestedSegments": 72
+        }
+      },
+      "residual": {
+        "schema": "QuantizedSparseResidual@0.6",
+        "quantizationStep": 4,
+        "budgetBytes": 196608,
+        "actualEncodedBytes": 8992,
+        "budgetMet": true,
+        "artifactEmitted": true,
+        "noPayloadFitsBudget": false,
+        "candidatePixels": 5761,
+        "coveredPixels": 5761,
+        "coverage": 0.46883138,
+        "selection": "largest_rgb_l1_quantized_residual",
+        "heuristicRateDistortion": {
+          "distortion": 0.59385848,
+          "estimatedBytes": 8992,
+          "normalizedRate": 0.73177083,
+          "score": 0.59495614
+        },
+        "artifact": "residuals.npz"
+      },
+      "codecComparisons": {
+        "PNG": {
+          "available": true,
+          "outputBytes": 379,
+          "runtimeMs": 0.921,
+          "quality": {
+            "mse": 0.0,
+            "psnr": 99.0,
+            "ssim": 1.0
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "JPEG": {
+          "available": true,
+          "outputBytes": 1368,
+          "runtimeMs": 0.641,
+          "quality": {
+            "mse": 130.64868164,
+            "psnr": 26.969753,
+            "ssim": 0.87647131
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "WebP": {
+          "available": true,
+          "outputBytes": 530,
+          "runtimeMs": 1.682,
+          "quality": {
+            "mse": 129.9163208,
+            "psnr": 26.994167,
+            "ssim": 0.87585648
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "AVIF": {
+          "available": true,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "SVG/VTracer": {
+          "available": false,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "vector if VTracer is installed",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        }
+      }
+    },
+    {
+      "category": "high_texture",
+      "provenance": "synthetic",
+      "file": "high-texture.png",
+      "originalDimensions": [
+        128,
+        96
+      ],
+      "analysisDimensions": [
+        128,
+        96
+      ],
+      "dimensions": [
+        128,
+        96
+      ],
+      "pixels": 12288,
+      "entityCountByLevel": {
+        "micro_region": 1,
+        "region": 1,
+        "composite": 1,
+        "entity": 1,
+        "image": 1
+      },
+      "relationshipCount": 4,
+      "representationBytes": 1045094,
+      "reconstructionBytes": 28167,
+      "quality": {
+        "mse": 1.49148226,
+        "psnr": 46.394623,
+        "ssim": 0.99974222,
+        "processingTimeMs": 363.843,
+        "representationOverhead": 28.34998915
+      },
+      "reconstructionModes": {
+        "level1": {
+          "mse": 2970.36889648,
+          "psnr": 13.402699,
+          "ssim": 0.01993297,
+          "entityCount": 1
+        },
+        "level2": {
+          "mse": 2970.36889648,
+          "psnr": 13.402699,
+          "ssim": 0.01993297,
+          "entityCount": 1
+        },
+        "level3": {
+          "mse": 2970.36889648,
+          "psnr": 13.402699,
+          "ssim": 0.01993297,
+          "entityCount": 1
+        },
+        "level4": {
+          "mse": 2970.36889648,
+          "psnr": 13.402699,
+          "ssim": 0.01993297,
+          "entityCount": 1
+        },
+        "full": {
+          "mse": 2970.36889648,
+          "psnr": 13.402699,
+          "ssim": 0.01993297,
+          "entityCount": 1
+        },
+        "constant": {
+          "mse": 2970.36889648,
+          "psnr": 13.402699,
+          "ssim": 0.01993297,
+          "entityCount": 1
+        },
+        "parametric": {
+          "mse": 3058.57666016,
+          "psnr": 13.27561,
+          "ssim": 0.01988395,
+          "entityCount": 1
+        },
+        "residual": {
+          "mse": 1.49148226,
+          "psnr": 46.394623,
+          "ssim": 0.99974222,
+          "entityCount": 1
+        }
+      },
+      "heuristicRateDistortion": {
+        "basis": "parameter_payload_estimate_not_serialized_storage",
+        "modes": {
+          "constant": {
+            "distortion": 2970.36889648,
+            "estimatedBytes": 12,
+            "normalizedRate": 0.00097656,
+            "score": 2970.36889794
+          },
+          "parametric": {
+            "distortion": 3058.57666016,
+            "estimatedBytes": 12,
+            "normalizedRate": 0.00097656,
+            "score": 3058.57666162
+          },
+          "residual": {
+            "distortion": 1.49148226,
+            "estimatedBytes": 44966,
+            "normalizedRate": 3.65934245,
+            "score": 1.49697127
+          }
+        }
+      },
+      "artifactStorage": {
+        "schema": "ArtifactStorage@0.5",
+        "basis": "actual_emitted_file_bytes",
+        "files": {
+          "errors/absolute-error.png": 24007,
+          "errors/parametric-error.png": 35767,
+          "errors/per-region-error.png": 344,
+          "errors/residual-energy.png": 36841,
+          "features.npz": 1013822,
+          "overlays/brightness.png": 33974,
+          "overlays/complexity.png": 36446,
+          "overlays/edge-strength.png": 9411,
+          "overlays/gradient-x.png": 28940,
+          "overlays/gradient-y.png": 25724,
+          "overlays/normalized-distance-graph.png": 37086,
+          "overlays/relationship-graph.png": 37086,
+          "reconstructed.png": 28167,
+          "reconstruction.svg": 116,
+          "reconstructions/constant.png": 290,
+          "reconstructions/full.png": 290,
+          "reconstructions/level1.png": 290,
+          "reconstructions/level2.png": 290,
+          "reconstructions/level3.png": 290,
+          "reconstructions/level4.png": 290,
+          "reconstructions/parametric.png": 291,
+          "reconstructions/residual.png": 28167,
+          "representation.json": 31272,
+          "residuals.npz": 44966
+        },
+        "totalBytes": 1454167
+      },
+      "segmentationDiagnostics": {
+        "slic": {
+          "strategy": "slic",
+          "entityCount": 1,
+          "meanBoundaryEdgeStrength": 0.0,
+          "requestedSegments": 72
+        },
+        "watershed": {
+          "strategy": "watershed",
+          "entityCount": 70,
+          "meanBoundaryEdgeStrength": 0.35539216,
+          "requestedSegments": 72
+        },
+        "felzenszwalb": {
+          "strategy": "felzenszwalb",
+          "entityCount": 435,
+          "meanBoundaryEdgeStrength": 0.37811378,
+          "requestedSegments": 72
+        }
+      },
+      "residual": {
+        "schema": "QuantizedSparseResidual@0.6",
+        "quantizationStep": 4,
+        "budgetBytes": 196608,
+        "actualEncodedBytes": 44966,
+        "budgetMet": true,
+        "artifactEmitted": true,
+        "noPayloadFitsBudget": false,
+        "candidatePixels": 12288,
+        "coveredPixels": 12288,
+        "coverage": 1.0,
+        "selection": "largest_rgb_l1_quantized_residual",
+        "heuristicRateDistortion": {
+          "distortion": 1.49148226,
+          "estimatedBytes": 44966,
+          "normalizedRate": 3.65934245,
+          "score": 1.49697127
+        },
+        "artifact": "residuals.npz"
+      },
+      "codecComparisons": {
+        "PNG": {
+          "available": true,
+          "outputBytes": 37033,
+          "runtimeMs": 2.057,
+          "quality": {
+            "mse": 0.0,
+            "psnr": 99.0,
+            "ssim": 1.0
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "JPEG": {
+          "available": true,
+          "outputBytes": 10996,
+          "runtimeMs": 0.774,
+          "quality": {
+            "mse": 1962.44250488,
+            "psnr": 15.202834,
+            "ssim": 0.54808931
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "WebP": {
+          "available": true,
+          "outputBytes": 9614,
+          "runtimeMs": 4.626,
+          "quality": {
+            "mse": 1947.70922852,
+            "psnr": 15.235563,
+            "ssim": 0.54741527
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "AVIF": {
+          "available": true,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "SVG/VTracer": {
+          "available": false,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "vector if VTracer is installed",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        }
+      }
+    },
+    {
+      "category": "natural_photo_sample",
+      "provenance": "bundled_real_photo",
+      "file": "natural-photo-sample.png",
+      "originalDimensions": [
+        512,
+        512
+      ],
+      "analysisDimensions": [
+        512,
+        512
+      ],
+      "dimensions": [
+        512,
+        512
+      ],
+      "pixels": 262144,
+      "entityCountByLevel": {
+        "micro_region": 46,
+        "region": 27,
+        "composite": 19,
+        "entity": 15,
+        "image": 1
+      },
+      "relationshipCount": 503,
+      "representationBytes": 15644036,
+      "reconstructionBytes": 197830,
+      "quality": {
+        "mse": 202.79316711,
+        "psnr": 25.06027,
+        "ssim": 0.72166237,
+        "processingTimeMs": 17953.862,
+        "representationOverhead": 19.89242045
+      },
+      "reconstructionModes": {
+        "level1": {
+          "mse": 2045.27087402,
+          "psnr": 15.023295,
+          "ssim": 0.44938427,
+          "entityCount": 46
+        },
+        "level2": {
+          "mse": 2130.0769043,
+          "psnr": 14.846851,
+          "ssim": 0.41698068,
+          "entityCount": 27
+        },
+        "level3": {
+          "mse": 2223.36621094,
+          "psnr": 14.660694,
+          "ssim": 0.405758,
+          "entityCount": 19
+        },
+        "level4": {
+          "mse": 2315.42504883,
+          "psnr": 14.484497,
+          "ssim": 0.41063473,
+          "entityCount": 15
+        },
+        "full": {
+          "mse": 2045.27087402,
+          "psnr": 15.023295,
+          "ssim": 0.44938427,
+          "entityCount": 46
+        },
+        "constant": {
+          "mse": 2045.27087402,
+          "psnr": 15.023295,
+          "ssim": 0.44938427,
+          "entityCount": 46
+        },
+        "parametric": {
+          "mse": 1355.03723145,
+          "psnr": 16.811292,
+          "ssim": 0.46220332,
+          "entityCount": 46
+        },
+        "residual": {
+          "mse": 202.79316711,
+          "psnr": 25.06027,
+          "ssim": 0.72166237,
+          "entityCount": 46
+        }
+      },
+      "heuristicRateDistortion": {
+        "basis": "parameter_payload_estimate_not_serialized_storage",
+        "modes": {
+          "constant": {
+            "distortion": 2045.27087402,
+            "estimatedBytes": 552,
+            "normalizedRate": 0.00210571,
+            "score": 2045.27087718
+          },
+          "parametric": {
+            "distortion": 1355.03723145,
+            "estimatedBytes": 960,
+            "normalizedRate": 0.00366211,
+            "score": 1355.03723694
+          },
+          "residual": {
+            "distortion": 202.79316711,
+            "estimatedBytes": 196606,
+            "normalizedRate": 0.74999237,
+            "score": 202.7942921
+          }
+        }
+      },
+      "artifactStorage": {
+        "schema": "ArtifactStorage@0.5",
+        "basis": "actual_emitted_file_bytes",
+        "files": {
+          "errors/absolute-error.png": 593433,
+          "errors/parametric-error.png": 443204,
+          "errors/per-region-error.png": 32291,
+          "errors/residual-energy.png": 205292,
+          "features.npz": 14732231,
+          "overlays/brightness.png": 411962,
+          "overlays/complexity.png": 641808,
+          "overlays/edge-strength.png": 68728,
+          "overlays/gradient-x.png": 441299,
+          "overlays/gradient-y.png": 374902,
+          "overlays/normalized-distance-graph.png": 555123,
+          "overlays/relationship-graph.png": 561595,
+          "reconstructed.png": 197830,
+          "reconstruction.svg": 73014,
+          "reconstructions/constant.png": 15122,
+          "reconstructions/full.png": 15122,
+          "reconstructions/level1.png": 15122,
+          "reconstructions/level2.png": 11252,
+          "reconstructions/level3.png": 9403,
+          "reconstructions/level4.png": 8011,
+          "reconstructions/parametric.png": 67831,
+          "reconstructions/residual.png": 197830,
+          "representation.json": 911805,
+          "residuals.npz": 196606
+        },
+        "totalBytes": 20780816
+      },
+      "segmentationDiagnostics": {
+        "slic": {
+          "strategy": "slic",
+          "entityCount": 46,
+          "meanBoundaryEdgeStrength": 0.28698203,
+          "requestedSegments": 72
+        },
+        "watershed": {
+          "strategy": "watershed",
+          "entityCount": 81,
+          "meanBoundaryEdgeStrength": 0.14781688,
+          "requestedSegments": 72
+        },
+        "felzenszwalb": {
+          "strategy": "felzenszwalb",
+          "entityCount": 3590,
+          "meanBoundaryEdgeStrength": 0.24630362,
+          "requestedSegments": 72
+        }
+      },
+      "residual": {
+        "schema": "QuantizedSparseResidual@0.6",
+        "quantizationStep": 4,
+        "budgetBytes": 196608,
+        "actualEncodedBytes": 196606,
+        "budgetMet": true,
+        "artifactEmitted": true,
+        "noPayloadFitsBudget": false,
+        "candidatePixels": 131072,
+        "coveredPixels": 64327,
+        "coverage": 0.24538803,
+        "selection": "largest_rgb_l1_quantized_residual",
+        "heuristicRateDistortion": {
+          "distortion": 202.79316711,
+          "estimatedBytes": 196606,
+          "normalizedRate": 0.74999237,
+          "score": 202.7942921
+        },
+        "artifact": "residuals.npz"
+      },
+      "codecComparisons": {
+        "PNG": {
+          "available": true,
+          "outputBytes": 424520,
+          "runtimeMs": 96.738,
+          "quality": {
+            "mse": 0.0,
+            "psnr": 99.0,
+            "ssim": 1.0
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "JPEG": {
+          "available": true,
+          "outputBytes": 74962,
+          "runtimeMs": 4.548,
+          "quality": {
+            "mse": 12.24522781,
+            "psnr": 37.251135,
+            "ssim": 0.96342409
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "WebP": {
+          "available": true,
+          "outputBytes": 52912,
+          "runtimeMs": 41.362,
+          "quality": {
+            "mse": 11.09204483,
+            "psnr": 37.680687,
+            "ssim": 0.96476184
+          },
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "AVIF": {
+          "available": true,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "raster",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        },
+        "SVG/VTracer": {
+          "available": false,
+          "outputBytes": null,
+          "runtimeMs": null,
+          "quality": null,
+          "editability": "vector if VTracer is installed",
+          "hierarchyAvailability": false,
+          "relationshipAvailability": false
+        }
+      }
+    }
+  ],
+  "pendingInputCategories": [
+    {
+      "category": "natural_photograph",
+      "reason": "Provide a licensed photograph in --input-dir."
+    },
+    {
+      "category": "screenshot",
+      "reason": "Provide a representative screenshot in --input-dir."
+    }
+  ],
+  "researchPrototype": true
+}

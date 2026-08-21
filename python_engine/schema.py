@@ -7,15 +7,18 @@ import json
 from copy import deepcopy
 from typing import Any, Dict
 
-SCHEMA_VERSION = "0.6.0"
-SUPPORTED_VERSIONS = ("0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.6.0")
+SCHEMA_VERSION = "0.7.0"
+SUPPORTED_VERSIONS = ("0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.6.0", "0.7.0")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "maxImagePixels": 786_432,
     "groupingMethod": "slic",
     "segmentationStrategy": "slic",
-    "hierarchyMethod": "iterative_graph_agglomerative",
+    "hierarchyMethod": "global_energy_merge_tree",
     "maxAgglomerationIterations": 2048,
+    "mergeEnergyThreshold": 0.0,
+    "mergeEnergyWeights": {"distortion": 1.0, "rate": 0.06, "boundary": 0.45, "shape": 0.18, "complexity": 0.12},
+    "derivedCutTargetFractions": {"region": 0.50, "composite": 0.25, "entity": 0.10},
     "scaleLevels": [1, 2, 4, 8],
     "slicSegments": 72,
     "slicCompactness": 10.0,
@@ -31,6 +34,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "runScaleConsistency": True,
     "maxConsistencyPixels": 786_432,
     "crossScaleOverlapThreshold": 0.20,
+    "labDeltaESigma": 22.0,
+    "boundaryGradientPercentile": 99.0,
+    "topology": "4-neighbour",
     "runParameterSensitivity": False,
     "sensitivityVariantLimit": 5,
     "reconstructionProfile": "balanced",
@@ -78,4 +84,5 @@ def read_compatible_representation(payload: Dict[str, Any]) -> Dict[str, Any]:
             if entity.get("crossScaleParentId") and not entity.get("crossScaleMatchId"):
                 entity["crossScaleMatchId"] = entity["crossScaleParentId"]
         return {"version": version, "entities": entities, "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.4-with-correspondence-alias"}
-    return {"version": version, "entities": entities, "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.5" if version == "0.5.0" else "native-v0.6"}
+    compatibility = "native-v0.5" if version == "0.5.0" else "native-v0.6" if version == "0.6.0" else "native-v0.7"
+    return {"version": version, "entities": entities, "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": compatibility}

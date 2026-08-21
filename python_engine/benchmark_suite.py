@@ -28,8 +28,11 @@ DEFAULT_CONFIG = {
     "maxImagePixels": 786_432,
     "groupingMethod": "slic",
     "segmentationStrategy": "slic",
-    "hierarchyMethod": "iterative_graph_agglomerative",
+    "hierarchyMethod": "global_energy_merge_tree",
     "maxAgglomerationIterations": 2048,
+    "mergeEnergyThreshold": 0.0,
+    "mergeEnergyWeights": {"distortion": 1.0, "rate": 0.06, "boundary": 0.45, "shape": 0.18, "complexity": 0.12},
+    "derivedCutTargetFractions": {"region": 0.50, "composite": 0.25, "entity": 0.10},
     "scaleLevels": [1, 2, 4, 8],
     "slicSegments": 72,
     "slicCompactness": 10,
@@ -37,6 +40,9 @@ DEFAULT_CONFIG = {
     "runScaleConsistency": False,
     "maxConsistencyPixels": 786_432,
     "crossScaleOverlapThreshold": 0.20,
+    "labDeltaESigma": 22.0,
+    "boundaryGradientPercentile": 99.0,
+    "topology": "4-neighbour",
     "reconstructionProfile": "balanced",
     "appearanceModelCandidates": ["constant", "affine", "quadratic"],
     "modelPenalty": 0.00045,
@@ -166,20 +172,27 @@ def record_for(source: Path, category: str, provenance: str, output_dir: Path) -
         "heuristicRateDistortion": representation["reconstruction_metadata"]["heuristicRateDistortion"],
         "artifactStorage": representation["artifactStorage"],
         "segmentationDiagnostics": representation["segmentationDiagnostics"],
+        "mergeTree": {
+            "nodeCount": len(representation["hierarchy"]["treeNodeIds"]),
+            "rootCount": len(representation["hierarchy"]["treeRootIds"]),
+            "cutTargetNodeCounts": {name: cut["targetNodeCount"] for name, cut in representation["hierarchy"]["cuts"].items()},
+            "acceptedMergeCount": sum(bool(item.get("accepted")) for item in representation["hierarchy"]["mergeEvidence"]),
+        },
+        "crossScaleReporting": {"status": representation["scale_consistency"]["status"], "normalizedOverlapMatrix": representation["scale_correspondence"]["normalizedOverlapMatrix"]},
         "residual": representation["reconstruction_metadata"]["residual"],
         "codecComparisons": codec_comparisons(source, output_dir / "codec-baselines"),
     }
 
 
 def write_report(records: list[Dict[str, Any]], pending: list[Dict[str, str]], output_path: Path) -> None:
-    payload = {"benchmarkVersion": "0.6.0", "codecBaselines": codec_baselines(), "records": records, "pendingInputCategories": pending, "researchPrototype": True}
+    payload = {"benchmarkVersion": "0.7.0", "codecBaselines": codec_baselines(), "records": records, "pendingInputCategories": pending, "researchPrototype": True}
     (output_path / "benchmark-report.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     lines = ["# Relational Representation Benchmark", "", "| Category | Provenance | Pixels | Entities | Edges | Constant PSNR | Model PSNR | Residual PSNR | Runtime |", "|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     for record in records:
         quality = record["quality"]
         modes = record["reconstructionModes"]
         lines.append(f"| {record['category']} | {record['provenance']} | {record['pixels']} | {sum(record['entityCountByLevel'].values())} | {record['relationshipCount']} | {modes['constant']['psnr']:.2f} | {modes['parametric']['psnr']:.2f} | {modes['residual']['psnr']:.2f} | {quality['processingTimeMs']:.1f} ms |")
-    lines += ["", "The report records iterative structural grouping, three deterministic reconstruction modes, heuristic model scores, actual sparse residual artifact bytes, actual emitted storage, and server-side SLIC/watershed/Felzenszwalb diagnostics for every fixture.", "", "## Pending user-supplied categories", ""] + [f"- `{item['category']}`: {item['reason']}" for item in pending]
+    lines += ["", "The report records the global energy-scored merge tree, deterministic derived cuts, three reconstruction modes, heuristic model scores, actual sparse residual artifact bytes, actual emitted storage, and server-side SLIC/watershed/Felzenszwalb diagnostics for every fixture.", "", "## Pending user-supplied categories", ""] + [f"- `{item['category']}`: {item['reason']}" for item in pending]
     lines += ["", "This research-prototype benchmark reports deterministic internal measurements; it does not claim scientific validation, codec bit-rate equivalence, or superiority over image codecs or vectorizers."]
     (output_path / "benchmark-report.md").write_text("\n".join(lines), encoding="utf-8")
 

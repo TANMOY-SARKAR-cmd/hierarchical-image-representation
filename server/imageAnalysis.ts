@@ -10,8 +10,21 @@ export type AnalysisConfig = {
   maxImagePixels: number;
   groupingMethod: "slic" | "watershed" | "felzenszwalb";
   segmentationStrategy: "slic" | "watershed" | "felzenszwalb";
-  hierarchyMethod: "iterative_graph_agglomerative";
+  hierarchyMethod: "global_energy_merge_tree";
   maxAgglomerationIterations: number;
+  mergeEnergyThreshold: number;
+  mergeEnergyWeights: {
+    distortion: number;
+    rate: number;
+    boundary: number;
+    shape: number;
+    complexity: number;
+  };
+  derivedCutTargetFractions: {
+    region: number;
+    composite: number;
+    entity: number;
+  };
   scaleLevels: number[];
   slicSegments: number;
   slicCompactness: number;
@@ -19,6 +32,9 @@ export type AnalysisConfig = {
   runScaleConsistency: boolean;
   maxConsistencyPixels: number;
   crossScaleOverlapThreshold: number;
+  labDeltaESigma: number;
+  boundaryGradientPercentile: number;
+  topology: "4-neighbour";
   graphK: number;
   mergeThreshold: number;
   edgeBarrierThreshold: number;

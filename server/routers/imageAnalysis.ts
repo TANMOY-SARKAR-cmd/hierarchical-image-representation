@@ -8,8 +8,25 @@ const analysisConfig = z.object({
   maxImagePixels: z.number().int().min(64 * 64).max(2_000_000).default(Number(process.env.MAX_IMAGE_PIXELS ?? 786_432)),
   groupingMethod: z.enum(["slic", "watershed", "felzenszwalb"]).default("slic"),
   segmentationStrategy: z.enum(["slic", "watershed", "felzenszwalb"]).default("slic"),
-  hierarchyMethod: z.literal("iterative_graph_agglomerative").default("iterative_graph_agglomerative"),
+  hierarchyMethod: z.literal("global_energy_merge_tree").default("global_energy_merge_tree"),
   maxAgglomerationIterations: z.number().int().min(1).max(20_000).default(2048),
+  mergeEnergyThreshold: z.number().min(-10).max(10).default(0),
+  mergeEnergyWeights: z
+    .object({
+      distortion: z.number().min(0).max(10).default(1),
+      rate: z.number().min(0).max(10).default(0.06),
+      boundary: z.number().min(0).max(10).default(0.45),
+      shape: z.number().min(0).max(10).default(0.18),
+      complexity: z.number().min(0).max(10).default(0.12),
+    })
+    .default({ distortion: 1, rate: 0.06, boundary: 0.45, shape: 0.18, complexity: 0.12 }),
+  derivedCutTargetFractions: z
+    .object({
+      region: z.number().min(0.01).max(1).default(0.5),
+      composite: z.number().min(0.01).max(1).default(0.25),
+      entity: z.number().min(0.01).max(1).default(0.1),
+    })
+    .default({ region: 0.5, composite: 0.25, entity: 0.1 }),
   scaleLevels: z.array(z.number().int().min(1).max(8)).min(1).max(4).default([1, 2, 4, 8]),
   slicSegments: z.number().int().min(8).max(180).default(72),
   slicCompactness: z.number().min(0.1).max(50).default(10),
@@ -17,6 +34,9 @@ const analysisConfig = z.object({
   runScaleConsistency: z.boolean().default(true),
   maxConsistencyPixels: z.number().int().min(64 * 64).max(1_500_000).default(786_432),
   crossScaleOverlapThreshold: z.number().min(0.01).max(1).default(0.20),
+  labDeltaESigma: z.number().min(1).max(100).default(22),
+  boundaryGradientPercentile: z.number().min(50).max(100).default(99),
+  topology: z.literal("4-neighbour").default("4-neighbour"),
   graphK: z.number().int().min(1).max(12).default(3),
   mergeThreshold: z.number().min(0.1).max(0.95).default(0.58),
   edgeBarrierThreshold: z.number().min(0).max(1).default(0.70),

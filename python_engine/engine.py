@@ -11,11 +11,11 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from correspondence import match_scales, overlap_scales
+from correspondence import match_scales, normalized_overlap_matrix, overlap_scales
 from features import PIXEL_VECTOR_FIELDS, extract_features
-from geometry import make_entity, rounded
+from geometry import aggregate_sufficient_statistics, make_entity, rounded
 from graph import build_relationships, containment_edge
-from hierarchy import graph_group_level
+from hierarchy import build_global_merge_tree, derive_tree_cut
 from reconstruction import create_svg, metrics_for, reconstruct_entities, write_overlay, write_relationship_overlay
 from reconstruction_models import fit_entity_models, reconstruct_adaptive
 from residuals import bounded_residual
@@ -145,13 +145,18 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
         profile["crossScaleCorrespondenceMs"] = rounded((time.perf_counter() - correspondence_started) * 1000, 3)
 
     hierarchy_started = time.perf_counter()
-    regions = graph_group_level(micro_regions, masks, rgb, base_fields, "region", 2, config, 1.0)
-    composites = graph_group_level(regions, masks, rgb, base_fields, "composite", 3, config, 0.92)
-    entities_level = graph_group_level(composites, masks, rgb, base_fields, "entity", 4, config, 0.84)
+    merge_nodes, tree_roots, merge_evidence = build_global_merge_tree(micro_regions, masks, rgb, base_fields, config)
+    tree_lookup = {item["id"]: item for item in [*micro_regions, *merge_nodes]}
+    fractions = config["derivedCutTargetFractions"]
+    cut_targets = {name: max(len(tree_roots), int(round(len(micro_regions) * float(fraction)))) for name, fraction in fractions.items()}
+    regions = derive_tree_cut(tree_roots, tree_lookup, cut_targets["region"])
+    composites = derive_tree_cut(tree_roots, tree_lookup, cut_targets["composite"])
+    entities_level = derive_tree_cut(tree_roots, tree_lookup, cut_targets["entity"])
     root_mask = np.ones((height, width), dtype=bool)
-    root = make_entity("image-root", "image", 5, 1, root_mask, rgb, base_fields, [entity["id"] for entity in entities_level], {"operation": "root_anchor", "parents": [entity["id"] for entity in entities_level], "semantics": "explicit_full_image_anchor_not_inferred_agglomeration"})
-    for entity in entities_level: entity["parentId"] = root["id"]
-    masks[root["id"]] = root_mask; all_entities = micro_regions + regions + composites + entities_level + [root]
+    root = make_entity("image-root", "image", max([item["level"] for item in [*micro_regions, *merge_nodes]] or [1]) + 1, 1, root_mask, rgb, base_fields, [entity["id"] for entity in tree_roots], {"operation": "root_anchor", "parents": [entity["id"] for entity in tree_roots], "semantics": "explicit_full_image_anchor_not_inferred_agglomeration"}, aggregate_sufficient_statistics(tree_roots))
+    for entity in tree_roots: entity["parentId"] = root["id"]
+    masks[root["id"]] = root_mask; all_entities = [*micro_regions, *merge_nodes, root]
+    hierarchy_cuts = {name: {"targetNodeCount": cut_targets[name], "nodeIds": [entity["id"] for entity in cut], "policy": "largest_leaf_count_expansion_from_tree_roots"} for name, cut in (("region", regions), ("composite", composites), ("entity", entities_level))}
     profile["graphAgglomerationMs"] = rounded((time.perf_counter() - hierarchy_started) * 1000, 3)
 
     relationship_started = time.perf_counter(); relationships = build_relationships(micro_regions, masks, base_adjacency, (height, width), config, shared_boundaries)
@@ -195,6 +200,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     sensitivity_report = run_parameter_sensitivity(input_path, output_dir, config, analyze) if config.get("runParameterSensitivity", False) else None
 
     validity = validate_representation(all_entities, masks, root["id"])
+    overlap_matrix = normalized_overlap_matrix(cross_scale_overlaps)
     correspondence_summary = {
         "status": correspondence_status,
         "correspondenceMethod": "Hungarian IoU/centroid/appearance/area cost",
@@ -211,16 +217,16 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     model_bytes = int(sum(entity.get("appearanceModel", {}).get("parameterCount", 0) for entity in micro_regions) * 4)
     heuristic_rd_summary = {"basis": "parameter_payload_estimate_not_serialized_storage", "modes": {"constant": rate_distortion(constant_metrics["mse"], len(micro_regions) * 12, height * width, config), "parametric": rate_distortion(parametric_metrics["mse"], model_bytes, height * width, config), "residual": residual_metadata["heuristicRateDistortion"]}}
     quality = {**residual_metrics, "sourceBytes": source_bytes, "rawRgbBytes": int(rgb.nbytes), "representationBytes": 0, "reconstructedBytes": 0, "representationOverhead": 0.0, "processingTimeMs": 0.0}
-    experiment = {"id": f"exp-{config_hash(config)}-{int(started * 1000)}", "engineVersion": SCHEMA_VERSION, "configHash": config_hash(config), "algorithm": "fixed_depth_iterative_graph_agglomeration+adaptive_reconstruction", "timestampEpochMs": int(time.time() * 1000), "researchPrototype": True}
+    experiment = {"id": f"exp-{config_hash(config)}-{int(started * 1000)}", "engineVersion": SCHEMA_VERSION, "configHash": config_hash(config), "algorithm": "global_energy_scored_merge_tree+derived_cuts+adaptive_reconstruction", "timestampEpochMs": int(time.time() * 1000), "researchPrototype": True}
     representation: Dict[str, Any] = {
         "representation_version": SCHEMA_VERSION, "version": SCHEMA_VERSION, "coordinateSystem": "pixel coordinates are [x, y]; boundingBox is [minX, minY, maxX, maxY], inclusive", "experiment": experiment, "configuration": config,
         "image": {"width": width, "height": height, "channels": 3, "sourceBytes": source_bytes}, "image_metadata": {"width": width, "height": height, "channels": 3, "sourceBytes": source_bytes},
-        "feature_schema": {"PixelVector": {"fields": PIXEL_VECTOR_FIELDS, "shape": list(base_tensor.shape), "categories": ["geometry", "appearance", "local_structure"], "normalization": "coordinates use fixed image bounds; local positive fields use median/MAD robust scaling clipped to [-1,1]", "storage": "features.npz:pixelVectors"}, "EntityVector": {"schema": "EntityVector@0.6", "storage": "entities[].vector", "categories": ["geometry", "appearance", "structure", "shape"]}, "AppearanceModel": {"schema": "AppearanceModel@0.5", "storage": "entities[].appearanceModel", "candidates": config["appearanceModelCandidates"]}},
+        "feature_schema": {"PixelVector": {"fields": PIXEL_VECTOR_FIELDS, "shape": list(base_tensor.shape), "categories": ["geometry", "appearance", "local_structure"], "units": {"lab_l": "CIELAB_Lstar_0_to_100", "lab_a": "CIELAB_astar", "lab_b": "CIELAB_bstar", "gradient_magnitude": "robust_normalized_unit_interval", "edge_strength": "continuous_normalized_gradient_magnitude"}, "storage": "features.npz:pixelVectors"}, "EntityVector": {"schema": "EntityVector@0.7", "storage": "entities[].vector", "categories": ["geometry", "appearance", "structure", "shape"]}, "AppearanceModel": {"schema": "AppearanceModel@0.7", "storage": "entities[].appearanceModel", "coordinateSystem": "entity_local_bounding_box_normalized_minus1_to1", "candidates": config["appearanceModelCandidates"]}},
         "features": {"shape": list(base_tensor.shape), "channels": PIXEL_VECTOR_FIELDS, "artifact": "features.npz"}, "pixelLevel": {"assignmentArtifact": "features.npz", "assignmentKey": "pixelToMicroregion", "labelToMicroregionId": {str(label): f"resolution-1-micro-region-{label}" for label in range(1, int(base_labels.max()) + 1)}},
-        "resolutionPyramid": scales, "scales": scales, "scaleLevels": scales, "hierarchy": {"levels": {"pixel": 0, "micro_region": 1, "region": 2, "composite": 3, "entity": 4, "image": 5}, "rootId": root["id"], "grouping": "fixed-depth iterative connectivity-constrained graph agglomeration", "rootSemantics": "explicit_full_image_anchor_not_inferred_agglomeration"}, "entities": all_entities, "relationships": relationships,
-        "graph_metadata": {"construction": "region adjacency plus spatial/appearance KNN candidates; iterative grouping recomputes active merge candidates after every accepted union", "relationshipDensity": rounded(len(relationships) / max(len(all_entities), 1), 8), "candidateSources": ["adjacent", "spatial_knn", "appearance_knn", "hierarchy", "cross_scale_overlap"]}, "segmentationDiagnostics": segmentation_diagnostics,
-        "normalization_methods": {"normalizedDistance": "distance / image diagonal", "logAreaRatio": "log((source area + epsilon) / (target area + epsilon))", "logBrightnessRatio": "log((source brightness + epsilon) / (target brightness + epsilon))", "colorDistance": "Euclidean CIE Lab distance over normalized Lab components"},
-        "reconstruction_metadata": {"outputs": reconstruction_metadata, "heuristicRateDistortion": heuristic_rd_summary, "residual": residual_metadata, "errorArtifacts": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}}, "scale_correspondence": {"method": "Hungarian one-to-one best match on IoU, normalized centroid, appearance, and log-area terms", "bestMatches": cross_scale, "overlapLinks": cross_scale_overlaps, "links": cross_scale}, "scale_consistency": correspondence_summary, "parameterSensitivity": sensitivity_report, "validity": validity, "profiling": profile, "researchPrototype": {"status": "deterministic_internal_evaluation", "notScientificValidation": True, "notCodecRateMeasurement": True}, "artifactStorage": {"schema": "ArtifactStorage@0.6", "basis": "actual_emitted_file_bytes", "files": {}, "totalBytes": 0},
+        "resolutionPyramid": scales, "scales": scales, "scaleLevels": scales, "hierarchy": {"levels": {"pixel": 0, "micro_region": 1, "derived_region": 2, "derived_composite": 3, "derived_entity": 4, "image": root["level"]}, "rootId": root["id"], "grouping": "global_energy_scored_4_neighbour_merge_tree_with_derived_cuts", "rootSemantics": "explicit_full_image_anchor_not_inferred_agglomeration", "treeNodeIds": [item["id"] for item in merge_nodes], "treeRootIds": [item["id"] for item in tree_roots], "cuts": hierarchy_cuts, "mergeEvidence": merge_evidence}, "entities": all_entities, "relationships": relationships,
+        "graph_metadata": {"construction": "4-neighbour region adjacency plus spatial/appearance KNN candidates; global energy tree recomputes active merge candidates after every accepted union", "relationshipDensity": rounded(len(relationships) / max(len(all_entities), 1), 8), "candidateSources": ["adjacent", "spatial_knn", "appearance_knn", "hierarchy", "cross_scale_overlap"]}, "segmentationDiagnostics": segmentation_diagnostics,
+        "normalization_methods": {"normalizedDistance": "distance / image diagonal", "logAreaRatio": "log((source area + epsilon) / (target area + epsilon))", "logBrightnessRatio": "log((source brightness + epsilon) / (target brightness + epsilon))", "colorDistance": "DeltaE76 over explicit CIELAB units"},
+        "reconstruction_metadata": {"outputs": reconstruction_metadata, "heuristicRateDistortion": heuristic_rd_summary, "residual": residual_metadata, "errorArtifacts": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}}, "scale_correspondence": {"method": "Hungarian one-to-one best match on IoU, normalized centroid, appearance, and log-area terms", "bestMatches": cross_scale, "overlapLinks": cross_scale_overlaps, "normalizedOverlapMatrix": overlap_matrix, "links": cross_scale}, "scale_consistency": correspondence_summary, "parameterSensitivity": sensitivity_report, "validity": validity, "profiling": profile, "researchPrototype": {"status": "deterministic_internal_evaluation", "notScientificValidation": True, "notCodecRateMeasurement": True}, "artifactStorage": {"schema": "ArtifactStorage@0.7", "basis": "actual_emitted_file_bytes", "files": {}, "totalBytes": 0},
         "artifacts": {"features": "features.npz", "residuals": residual_metadata.get("artifact"), "parameterSensitivity": "sensitivity/report.json" if sensitivity_report else None, "reconstructedPng": "reconstructed.png", "svg": "reconstruction.svg", "reconstructions": {name: value["artifact"] for name, value in reconstruction_metadata.items()}, "errors": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}, "overlays": {"brightness": "overlays/brightness.png", "edgeStrength": "overlays/edge-strength.png", "gradientX": "overlays/gradient-x.png", "gradientY": "overlays/gradient-y.png", "complexity": "overlays/complexity.png", "relationshipGraph": "overlays/relationship-graph.png", "normalizedDistanceGraph": "overlays/normalized-distance-graph.png", "residualEnergy": "errors/residual-energy.png"}}, "metrics": quality, "quality_metrics": quality,
     }
     serialization_started = time.perf_counter(); representation_path = output_dir / "representation.json"; quality["processingTimeMs"] = rounded((time.perf_counter() - started) * 1000, 3)

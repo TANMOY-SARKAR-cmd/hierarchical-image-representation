@@ -34,7 +34,7 @@ describe("Node-to-Python image analysis integration", () => {
     const result = await analyzeImage(request.json);
     const representation = result.representation as {
       pixelLevel: { assignmentKey: string };
-      hierarchy: { rootId: string };
+      hierarchy: { rootId: string; treeNodeIds: string[]; cuts: Record<string, { nodeIds: string[]; targetNodeCount: number }> };
       entities: unknown[];
       relationships: unknown[];
       metrics: { ssim: number; processingTimeMs: number };
@@ -42,6 +42,8 @@ describe("Node-to-Python image analysis integration", () => {
 
     expect(representation.pixelLevel.assignmentKey).toBe("pixelToMicroregion");
     expect(representation.hierarchy.rootId).toBe("image-root");
+    expect(Array.isArray(representation.hierarchy.treeNodeIds)).toBe(true);
+    expect(representation.hierarchy.cuts.entity.nodeIds.length).toBeGreaterThan(0);
     expect(representation.entities.length).toBeGreaterThan(4);
     expect(representation.relationships.length).toBeGreaterThan(0);
     expect(representation.metrics.ssim).toBeGreaterThanOrEqual(0);
@@ -52,7 +54,7 @@ describe("Node-to-Python image analysis integration", () => {
     const pngArtifacts = uploadedArtifacts.filter(item => item.contentType === "image/png");
     const svgArtifact = uploadedArtifacts.find(item => item.contentType === "image/svg+xml");
     const uploadedRepresentation = JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}") as { reconstruction_metadata?: { residual?: { artifactEmitted?: boolean; actualEncodedBytes?: number } } };
-    expect(uploadedRepresentation).toMatchObject({ representation_version: "0.6.0", hierarchy: { grouping: "fixed-depth iterative connectivity-constrained graph agglomeration" }, reconstruction_metadata: { outputs: { parametric: expect.any(Object), residual: expect.any(Object) }, heuristicRateDistortion: { basis: "parameter_payload_estimate_not_serialized_storage" } }, artifactStorage: { basis: "actual_emitted_file_bytes" } });
+    expect(uploadedRepresentation).toMatchObject({ representation_version: "0.7.0", hierarchy: { grouping: "global_energy_scored_4_neighbour_merge_tree_with_derived_cuts", treeNodeIds: expect.any(Array), cuts: { region: expect.any(Object), composite: expect.any(Object), entity: expect.any(Object) } }, reconstruction_metadata: { outputs: { parametric: expect.any(Object), residual: expect.any(Object) }, heuristicRateDistortion: { basis: "parameter_payload_estimate_not_serialized_storage" } }, artifactStorage: { basis: "actual_emitted_file_bytes" } });
     const residualEmitted = Boolean(uploadedRepresentation.reconstruction_metadata?.residual?.artifactEmitted);
     expect(uploadedArtifacts).toHaveLength(residualEmitted ? 25 : 24);
     expect(npzArtifacts).toHaveLength(residualEmitted ? 2 : 1);

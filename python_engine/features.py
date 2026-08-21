@@ -1,4 +1,4 @@
-"""Dense, category-aware pixel feature fields with stable robust normalization."""
+"""Dense pixel fields with explicit physical/statistical units and normalized analysis channels."""
 
 from __future__ import annotations
 
@@ -52,7 +52,8 @@ def extract_features(rgb: np.ndarray, config: Dict[str, Any]) -> Tuple[np.ndarra
     gradient_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
     gradient_magnitude = np.hypot(gradient_x, gradient_y).astype(np.float32)
     gradient_orientation = np.arctan2(gradient_y, gradient_x).astype(np.float32)
-    edge_strength = cv2.Canny((gray * 255).astype(np.uint8), 64, 128).astype(np.float32) / 255.0
+    gradient_reference = max(float(np.percentile(gradient_magnitude, float(config.get("boundaryGradientPercentile", 99.0)))), 1e-6)
+    edge_strength = np.clip(gradient_magnitude / gradient_reference, 0.0, 1.0).astype(np.float32)
     local_mean = uniform_filter(gray, size=5, mode="reflect")
     local_variance = np.maximum(uniform_filter(gray * gray, size=5, mode="reflect") - local_mean * local_mean, 0).astype(np.float32)
     entropy = local_entropy(gray)
@@ -68,8 +69,8 @@ def extract_features(rgb: np.ndarray, config: Dict[str, Any]) -> Tuple[np.ndarra
         "x_normalized": (xx / max(width - 1, 1)).astype(np.float32), "y_normalized": (yy / max(height - 1, 1)).astype(np.float32),
         "red": rgb_unit[:, :, 0], "green": rgb_unit[:, :, 1], "blue": rgb_unit[:, :, 2], "lightness": gray,
         "saturation": hsv[:, :, 1] / 255.0, "hue": hsv[:, :, 0] / 179.0,
-        "lab_l": lab[:, :, 0] / 255.0, "lab_a": (lab[:, :, 1] - 128.0) / 127.0, "lab_b": (lab[:, :, 2] - 128.0) / 127.0,
-        "gradient_x": robust_normalize(gradient_x), "gradient_y": robust_normalize(gradient_y), "gradient_magnitude": robust_normalize(gradient_magnitude),
+        "lab_l": lab[:, :, 0] * (100.0 / 255.0), "lab_a": lab[:, :, 1] - 128.0, "lab_b": lab[:, :, 2] - 128.0,
+        "gradient_x": robust_normalize(gradient_x), "gradient_y": robust_normalize(gradient_y), "gradient_magnitude": np.clip(gradient_magnitude / gradient_reference, 0.0, 1.0),
         "gradient_orientation": gradient_orientation / np.pi, "edge_strength": edge_strength, "local_variance": robust_normalize(local_variance), "local_entropy": entropy,
         "complexity": np.clip(complexity, 0.0, 1.0),
     }

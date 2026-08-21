@@ -91,3 +91,14 @@
 - [x] Consolidate the active Python CLI path, remove stale active configuration, and retain only documented compatibility shims.
 - [x] Add a deterministic parameter-sensitivity evidence harness and workbench inspection/export access.
 - [x] Update tests, documentation, validation, checkpointing, synchronization, and delivery for v0.6.
+- [x] Freeze reproducible v0.6 comparison fixtures and baseline evidence for the v0.7 redesign.
+- [x] Advance the active schema to v0.7 with explicit CIELAB/relationship units, 4-neighbour topology, and local-coordinate metadata.
+- [x] Enforce child sufficient-statistics aggregation and continuous boundary evidence in the active merge pipeline while preserving canonical mask geometry.
+- [x] Replace staged affinity-threshold grouping with a deterministic global energy-scored merge tree and persistent merge evidence.
+- [x] Derive region, composite, and entity cuts from the global merge tree without obscuring the explicit image root.
+- [x] Add normalized cross-scale overlap-matrix summaries distinct from best-match and containment semantics.
+- [x] Align local reconstruction models and sparse residual selection with the v0.7 objective and measured squared-error distortion.
+- [x] Update local appearance-model fitting and reconstruction to use entity-local coordinates and a v0.7 selection contract.
+- [x] Update server contracts, workbench inspection, benchmark comparisons, regression tests, and documentation for v0.7.
+- [x] Update the README and user-facing documentation so they identify the active v0.7 energy-tree contract rather than superseded iterative agglomeration.
+- [x] Validate, checkpoint, synchronize, and deliver the completed v0.7 hybrid energy-tree redesign.

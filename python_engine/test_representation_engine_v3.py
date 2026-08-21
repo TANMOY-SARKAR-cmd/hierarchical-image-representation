@@ -9,7 +9,7 @@ from PIL import Image
 from engine import analyze
 from graph import relationship_for
 from geometry import make_entity
-from hierarchy import graph_group_level
+from hierarchy import build_global_merge_tree, graph_group_level
 from reconstruction_models import fit_appearance_model
 from schema import SCHEMA_VERSION, read_compatible_representation
 from segmentation import segment_image
@@ -34,13 +34,19 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertIn("configHash", representation["experiment"])
             fields = representation["feature_schema"]["PixelVector"]["fields"]
             self.assertIn("appearance.lab_l", fields); self.assertIn("local_structure.gradient_orientation", fields)
-            self.assertEqual(representation["hierarchy"]["grouping"], "fixed-depth iterative connectivity-constrained graph agglomeration")
+            self.assertEqual(representation["hierarchy"]["grouping"], "global_energy_scored_4_neighbour_merge_tree_with_derived_cuts")
+            self.assertIn("treeNodeIds", representation["hierarchy"])
+            self.assertEqual(set(representation["hierarchy"]["cuts"]), {"region", "composite", "entity"})
             self.assertEqual(representation["hierarchy"]["rootSemantics"], "explicit_full_image_anchor_not_inferred_agglomeration")
             self.assertTrue(representation["experiment"]["researchPrototype"])
             self.assertTrue(representation["validity"]["valid"])
             self.assertAlmostEqual(representation["validity"]["leafCoverage"], 1.0)
             self.assertFalse(representation["validity"]["duplicatePixelStorage"])
             self.assertTrue(all("memberPixels" not in entity for entity in representation["entities"]))
+            micro_models = [entity["appearanceModel"] for entity in representation["entities"] if entity["type"] == "micro_region"]
+            self.assertTrue(micro_models)
+            self.assertTrue(all(model["schema"] == "AppearanceModel@0.7" and model["coordinateSystem"] == "entity_local_bounding_box_normalized_minus1_to1" for model in micro_models))
+            self.assertTrue(all(model["selectionObjective"] == "normalized_cielab_squared_error_plus_model_and_boundary_penalties" for model in micro_models))
             entities_by_id = {entity["id"]: entity for entity in representation["entities"]}
             root = entities_by_id[representation["hierarchy"]["rootId"]]
             self.assertIsNone(root["parentId"])
@@ -64,10 +70,14 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertGreater(len(representation["scale_correspondence"]["links"]), 0)
             self.assertGreater(len(representation["scale_correspondence"]["overlapLinks"]), 0)
             self.assertTrue(all(link["primaryType"] == "cross_scale_overlap" and link["semantics"] == "fine_to_coarse_overlap_not_hierarchy_containment" for link in representation["scale_correspondence"]["overlapLinks"]))
+            overlap_matrix = representation["scale_correspondence"]["normalizedOverlapMatrix"]
+            self.assertEqual(overlap_matrix["schema"], "NormalizedFineToCoarseOverlapMatrix@0.7")
+            self.assertTrue(overlap_matrix["matrices"])
+            self.assertTrue(all(0.0 <= row["coverageSum"] <= 1.0 for matrix in overlap_matrix["matrices"] for row in matrix["rows"]))
             self.assertTrue(all(0 <= link["confidence"] <= 1 and link["cost"] <= 0.72 for link in representation["scale_correspondence"]["links"]))
             self.assertTrue(all("crossScaleParentId" not in entity for entity in representation["entities"]))
             self.assertTrue(any(entity.get("crossScaleMatchId") for entity in representation["entities"]))
-            self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.6")
+            self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.7")
             self.assertIn("slic", representation["segmentationDiagnostics"])
             self.assertIn("residual", representation["reconstruction_metadata"]["outputs"])
             self.assertIn("parametric", representation["reconstruction_metadata"]["heuristicRateDistortion"]["modes"])
@@ -159,17 +169,17 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
         from schema import resolved_config
 
         image = np.full((12, 16, 3), 120, dtype=np.uint8)
-        base_config = resolved_config({"minimumRegionPixels": 1, "mergeThreshold": 0.1, "maxEntityAreaFraction": 1.0, "edgeBarrierThreshold": 0.25})
+        base_config = resolved_config({"minimumRegionPixels": 1, "mergeEnergyThreshold": 1.0, "maxEntityAreaFraction": 1.0, "edgeBarrierThreshold": 0.25})
         _, fields = extract_features(image, base_config); fields["edge_strength"][:] = 1.0
         first_mask = np.zeros((12, 16), dtype=bool); first_mask[:, :8] = True; second_mask = ~first_mask
         children = [make_entity("first", "micro_region", 1, 1, first_mask, image, fields), make_entity("second", "micro_region", 1, 1, second_mask, image, fields)]
         masks = {"first": first_mask, "second": second_mask}
         blocked = graph_group_level(children, masks, image, fields, "region", 2, base_config, 1.0)
         self.assertEqual(len(blocked), 2)
-        self.assertTrue(all(item["lineage"]["operation"] == "carry" for item in blocked))
+        self.assertTrue(all(item["lineage"]["operation"] != "energy_merge" for item in blocked))
         permitted = graph_group_level(children, masks, image, fields, "region", 2, {**base_config, "edgeBarrierThreshold": 1.0}, 1.0)
         self.assertEqual(len(permitted), 1)
-        self.assertEqual(permitted[0]["lineage"]["mergeEvidence"]["boundaryEdgeStrength"], 1.0)
+        self.assertEqual(permitted[0]["lineage"]["mergeEvidence"]["energy"]["deltaBoundary"], 1.0)
         self.assertEqual(permitted[0]["lineage"]["mergeEvidence"]["edgeBarrierThreshold"], 1.0)
         with self.assertRaisesRegex(ValueError, "Unsupported segmentation strategy"):
             segment_image(image, "felzenzwalb", 16, 10, 1)
@@ -179,7 +189,7 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
         from schema import resolved_config
 
         image = np.full((12, 18, 3), 120, dtype=np.uint8)
-        config = resolved_config({"minimumRegionPixels": 1, "mergeThreshold": 0.1, "maxEntityAreaFraction": 1.0, "edgeBarrierThreshold": 1.0, "maxAgglomerationIterations": 10})
+        config = resolved_config({"minimumRegionPixels": 1, "mergeEnergyThreshold": 1.0, "maxEntityAreaFraction": 1.0, "edgeBarrierThreshold": 1.0, "maxAgglomerationIterations": 10})
         _, fields = extract_features(image, config); fields["edge_strength"][:] = 0.0
         masks = {}
         children = []
@@ -188,12 +198,11 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             entity_id = f"part-{index}"
             masks[entity_id] = mask
             children.append(make_entity(entity_id, "micro_region", 1, 1, mask, image, fields))
-        parents = graph_group_level(children, masks, image, fields, "region", 2, config, 1.0)
-        self.assertEqual(len(parents), 1)
-        self.assertCountEqual(parents[0]["children"], ["part-0", "part-1", "part-2"])
-        self.assertEqual(parents[0]["lineage"]["operation"], "iterative_merge")
-        self.assertEqual(parents[0]["lineage"]["iterationCount"], 2)
-        self.assertEqual(len(parents[0]["lineage"]["mergeSequence"]), 2)
+        nodes, roots, evidence = build_global_merge_tree(children, masks, image, fields, config)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["treeLeafCount"], 3)
+        self.assertEqual(len(nodes), 2)
+        self.assertEqual(sum(item.get("accepted", False) for item in evidence), 2)
 
     def test_tiny_residual_budget_omits_an_unrepresentable_sparse_payload(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -203,11 +212,41 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             output = workspace / "tiny-budget"
             payload = json.loads(Path(analyze(source, output, {"maxImagePixels": 10_000, "scaleLevels": [1], "slicSegments": 16, "minimumRegionPixels": 2, "residualBudgetBytes": 1})["representationPath"]).read_text())
             residual = payload["reconstruction_metadata"]["residual"]
+            self.assertEqual(residual["schema"], "QuantizedSparseResidual@0.7")
+            self.assertEqual(residual["selection"], "largest_rgb_squared_error_reduction_quantized_residual")
+            self.assertEqual(residual["selectionObjective"], "measured_rgb_squared_error_reduction_after_quantization")
             self.assertFalse(residual["artifactEmitted"])
             self.assertTrue(residual["noPayloadFitsBudget"])
             self.assertEqual(residual["actualEncodedBytes"], 0)
             self.assertIsNone(payload["artifacts"]["residuals"])
             self.assertFalse((output / "residuals.npz").exists())
+
+    def test_explicit_cielab_units_four_neighbour_topology_and_child_statistics_aggregation(self):
+        from features import extract_features
+        from geometry import aggregate_sufficient_statistics
+        from graph import masks_touch
+        from schema import resolved_config
+
+        image = np.zeros((4, 6, 3), dtype=np.uint8)
+        image[:, :3] = [255, 0, 0]
+        image[:, 3:] = [0, 255, 0]
+        _, fields = extract_features(image, resolved_config({"minimumRegionPixels": 1}))
+        self.assertGreater(fields["lab_l"].max(), 50.0)
+        self.assertLessEqual(fields["lab_l"].max(), 100.0)
+        self.assertGreater(abs(float(fields["lab_a"][:, :3].mean() - fields["lab_a"][:, 3:].mean())), 50.0)
+        first = np.zeros((4, 6), dtype=bool); first[:, :3] = True
+        second = ~first
+        diagonal = np.zeros((4, 6), dtype=bool); diagonal[0, 4] = True
+        isolated = np.zeros((4, 6), dtype=bool); isolated[1, 5] = True
+        self.assertTrue(masks_touch(first, second))
+        self.assertFalse(masks_touch(diagonal, isolated))
+        first_entity = make_entity("left", "micro_region", 1, 1, first, image, fields)
+        second_entity = make_entity("right", "micro_region", 1, 1, second, image, fields)
+        aggregate = aggregate_sufficient_statistics([first_entity, second_entity])
+        union_entity = make_entity("union", "region", 2, 1, first | second, image, fields, ["left", "right"], sufficient_override=aggregate)
+        self.assertEqual(aggregate["count"], union_entity["geometry"]["area"])
+        self.assertAlmostEqual(aggregate["sum"]["lab_l"], first_entity["statistics"]["sufficient"]["sum"]["lab_l"] + second_entity["statistics"]["sufficient"]["sum"]["lab_l"], places=8)
+        self.assertEqual(union_entity["vector"]["aggregation"], "child_sufficient_statistics_and_canonical_mask_geometry")
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ class ParameterSensitivityTest(unittest.TestCase):
             payload = json.loads(Path(analyze(source, output, {"maxImagePixels": 10_000, "scaleLevels": [1], "slicSegments": 16, "minimumRegionPixels": 2, "runParameterSensitivity": True, "sensitivityVariantLimit": 2})["representationPath"]).read_text())
 
             report = payload["parameterSensitivity"]
-            self.assertEqual(report["schema"], "ParameterSensitivity@0.6")
+            self.assertEqual(report["schema"], "ParameterSensitivity@0.7")
             self.assertEqual(report["design"], "bounded_one_factor_family_perturbations")
             self.assertEqual(len(report["records"]), 2)
             self.assertIn("not object-level semantic invariance", report["interpretation"])

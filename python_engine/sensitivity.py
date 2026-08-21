@@ -16,8 +16,8 @@ def sensitivity_variants(config: Dict[str, Any], limit: int) -> List[Dict[str, A
     variants = [
         ("coarser_partition", {"slicSegments": max(8, int(base["slicSegments"] * 0.75)), "slicCompactness": min(50.0, float(base["slicCompactness"]) * 1.25)}),
         ("finer_partition", {"slicSegments": min(180, int(base["slicSegments"] * 1.25)), "slicCompactness": max(0.1, float(base["slicCompactness"]) * 0.80)}),
-        ("conservative_merges", {"mergeThreshold": min(0.95, float(base["mergeThreshold"]) + 0.08), "edgeBarrierThreshold": min(1.0, float(base["edgeBarrierThreshold"]) + 0.15), "graphK": max(1, int(base["graphK"]) - 1)}),
-        ("permissive_merges", {"mergeThreshold": max(0.10, float(base["mergeThreshold"]) - 0.08), "edgeBarrierThreshold": max(0.0, float(base["edgeBarrierThreshold"]) - 0.15), "graphK": min(12, int(base["graphK"]) + 1)}),
+        ("conservative_merges", {"mergeEnergyThreshold": max(-10.0, float(base["mergeEnergyThreshold"]) - 0.08), "edgeBarrierThreshold": max(0.0, float(base["edgeBarrierThreshold"]) - 0.15)}),
+        ("permissive_merges", {"mergeEnergyThreshold": min(10.0, float(base["mergeEnergyThreshold"]) + 0.08), "edgeBarrierThreshold": min(1.0, float(base["edgeBarrierThreshold"]) + 0.15)}),
         ("native_scale_only", {"scaleLevels": [1]}),
     ]
     output: List[Dict[str, Any]] = []
@@ -41,7 +41,7 @@ def run_parameter_sensitivity(input_path: Path, output_dir: Path, config: Dict[s
             entity_counts[entity["type"]] = entity_counts.get(entity["type"], 0) + 1
         records.append({
             "label": label,
-            "changedConfiguration": {key: variant[key] for key in ("slicSegments", "slicCompactness", "mergeThreshold", "edgeBarrierThreshold", "graphK", "scaleLevels")},
+            "changedConfiguration": {key: variant[key] for key in ("slicSegments", "slicCompactness", "mergeEnergyThreshold", "mergeEnergyWeights", "edgeBarrierThreshold", "scaleLevels")},
             "entityCountByType": entity_counts,
             "relationshipCount": len(payload["relationships"]),
             "quality": {key: payload["metrics"][key] for key in ("mse", "psnr", "ssim", "processingTimeMs")},
@@ -49,9 +49,9 @@ def run_parameter_sensitivity(input_path: Path, output_dir: Path, config: Dict[s
             "configHash": payload["experiment"]["configHash"],
         })
     report = {
-        "schema": "ParameterSensitivity@0.6",
+        "schema": "ParameterSensitivity@0.7",
         "design": "bounded_one_factor_family_perturbations",
-        "referenceConfiguration": {key: config[key] for key in ("slicSegments", "slicCompactness", "mergeThreshold", "edgeBarrierThreshold", "graphK", "scaleLevels")},
+        "referenceConfiguration": {key: config[key] for key in ("slicSegments", "slicCompactness", "mergeEnergyThreshold", "mergeEnergyWeights", "edgeBarrierThreshold", "scaleLevels")},
         "records": records,
         "interpretation": "Deterministic internal parameter-dependence evidence only; not object-level semantic invariance or external scientific validation.",
     }

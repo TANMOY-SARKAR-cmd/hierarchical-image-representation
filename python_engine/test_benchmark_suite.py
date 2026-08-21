@@ -11,7 +11,7 @@ class BenchmarkSuiteTest(unittest.TestCase):
             output = Path(directory) / "benchmark"
             subprocess.run(["python3", "python_engine/benchmark_suite.py", "--output", str(output)], check=True, cwd=Path(__file__).resolve().parents[1])
             report = json.loads((output / "benchmark-report.json").read_text())
-            self.assertEqual(report["benchmarkVersion"], "0.6.0")
+            self.assertEqual(report["benchmarkVersion"], "0.7.0")
             self.assertTrue(report["researchPrototype"])
             self.assertEqual(len(report["records"]), 7)
             first = report["records"][0]
@@ -25,6 +25,8 @@ class BenchmarkSuiteTest(unittest.TestCase):
             self.assertLessEqual(first["residual"]["actualEncodedBytes"], first["residual"]["budgetBytes"])
             self.assertEqual(first["heuristicRateDistortion"]["basis"], "parameter_payload_estimate_not_serialized_storage")
             self.assertEqual(first["artifactStorage"]["basis"], "actual_emitted_file_bytes")
+            self.assertGreaterEqual(first["mergeTree"]["nodeCount"], first["mergeTree"]["acceptedMergeCount"])
+            self.assertEqual(first["crossScaleReporting"]["normalizedOverlapMatrix"]["schema"], "NormalizedFineToCoarseOverlapMatrix@0.7")
             self.assertTrue(first["codecComparisons"]["PNG"]["available"])
             self.assertGreater(first["codecComparisons"]["JPEG"]["outputBytes"], 0)
             self.assertIn("AVIF", first["codecComparisons"])

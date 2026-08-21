@@ -7,7 +7,6 @@ from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Mapping, Set, Tuple
 
 import numpy as np
-from scipy.ndimage import binary_dilation
 from scipy.spatial import cKDTree
 
 from geometry import EPSILON, rounded
@@ -40,7 +39,12 @@ def shape_similarity(source: Mapping[str, Any], target: Mapping[str, Any], weigh
 
 
 def masks_touch(first: np.ndarray, second: np.ndarray) -> bool:
-    return bool(np.logical_and(binary_dilation(first), second).any())
+    return bool(
+        np.logical_and(first[:, 1:], second[:, :-1]).any()
+        or np.logical_and(second[:, 1:], first[:, :-1]).any()
+        or np.logical_and(first[1:, :], second[:-1, :]).any()
+        or np.logical_and(second[1:, :], first[:-1, :]).any()
+    )
 
 
 def candidate_pairs(entities: List[Dict[str, Any]], adjacency: Set[Tuple[str, str]], graph_k: int) -> Dict[Tuple[int, int], Set[str]]:
@@ -71,7 +75,8 @@ def relationship_for(source: Dict[str, Any], target: Dict[str, Any], source_mask
     distance = math.hypot(dx, dy); normalized_distance = distance / max(math.hypot(width, height), EPSILON)
     source_area, target_area = source["geometry"]["area"], target["geometry"]["area"]
     lab_distance = color_distance(source, target)
-    color_similarity = math.exp(-(lab_distance * lab_distance) / (2 * 0.22 * 0.22))
+    color_sigma = max(float(config.get("labDeltaESigma", 22.0)), EPSILON)
+    color_similarity = math.exp(-(lab_distance * lab_distance) / (2 * color_sigma * color_sigma))
     brightness_difference = abs(source["appearance"]["brightness"] - target["appearance"]["brightness"])
     texture_similarity = math.exp(-abs(source["appearance"]["textureMeasure"] - target["appearance"]["textureMeasure"]) / 0.20)
     gradient_similarity = math.exp(-abs(source["appearance"]["meanGradient"] - target["appearance"]["meanGradient"]) / 0.30)
@@ -99,12 +104,12 @@ def relationship_for(source: Dict[str, Any], target: Dict[str, Any], source_mask
     return {
         "sourceId": source["id"], "targetId": target["id"], "entityLevel": source["level"], "candidateSources": sorted(sources),
         "relationshipType": kinds, "primaryType": kinds[0], "topology": {"adjacent": adjacent, "sharedBoundaryLength": shared_boundary},
-        "symmetric": {"distance": rounded(distance, 8), "normalizedDistance": rounded(normalized_distance, 8), "colorDistanceLab": rounded(lab_distance, 8), "shapeSimilarity": rounded(descriptor_similarity, 8), "textureSimilarity": rounded(texture_similarity, 8), "overlapIoU": rounded(overlap, 8), "boundaryContactRatio": rounded(boundary_ratio, 8)},
+        "symmetric": {"distance": rounded(distance, 8), "normalizedDistance": rounded(normalized_distance, 8), "colorDistanceDeltaE76": rounded(lab_distance, 8), "shapeSimilarity": rounded(descriptor_similarity, 8), "textureSimilarity": rounded(texture_similarity, 8), "overlapIoU": rounded(overlap, 8), "boundaryContactRatio": rounded(boundary_ratio, 8)},
         "directional": {"dx": rounded(dx, 8), "dy": rounded(dy, 8), "normalizedDx": rounded(dx / max(width, 1), 8), "normalizedDy": rounded(dy / max(height, 1), 8), "logAreaRatio": rounded(math.log((source_area + EPSILON) / (target_area + EPSILON)), 8), "brightnessDifference": rounded(brightness_difference, 8), "logBrightnessRatio": rounded(math.log((source["appearance"]["brightness"] + EPSILON) / (target["appearance"]["brightness"] + EPSILON)), 8)},
         "distance": rounded(distance, 8), "normalizedDistance": rounded(normalized_distance, 8), "angle": rounded(math.degrees(math.atan2(dy, dx)), 8), "normalizedDx": rounded(dx / max(width, 1), 8), "normalizedDy": rounded(dy / max(height, 1), 8),
         "sizeRatio": rounded(source_area / max(target_area, 1), 8), "areaRatio": rounded(source_area / max(target_area, 1), 8), "logAreaRatio": rounded(math.log((source_area + EPSILON) / (target_area + EPSILON)), 8),
         "brightnessDifference": rounded(brightness_difference, 8), "brightnessRatio": rounded((source["appearance"]["brightness"] + EPSILON) / (target["appearance"]["brightness"] + EPSILON), 8), "logBrightnessRatio": rounded(math.log((source["appearance"]["brightness"] + EPSILON) / (target["appearance"]["brightness"] + EPSILON)), 8),
-        "colorDistance": rounded(lab_distance, 8), "colorSimilarity": rounded(color_similarity, 8), "shapeSimilarity": rounded(descriptor_similarity, 8), "textureSimilarity": rounded(texture_similarity, 8), "gradientSimilarity": rounded(gradient_similarity, 8),
+        "colorDistance": rounded(lab_distance, 8), "colorDistanceUnits": "DeltaE76_CIELAB", "colorSimilarity": rounded(color_similarity, 8), "shapeSimilarity": rounded(descriptor_similarity, 8), "textureSimilarity": rounded(texture_similarity, 8), "gradientSimilarity": rounded(gradient_similarity, 8),
         "overlapRatio": rounded(overlap, 8), "boundaryContactRatio": rounded(boundary_ratio, 8), "containment": "none", "containmentRatio": 0.0,
         "affinity": rounded(max(0.0, min(1.0, affinity)), 8), "mergeAffinity": rounded(merge_affinity, 8), "confidence": rounded(confidence, 8), "adjacent": adjacent,
     }

@@ -19,8 +19,11 @@ const baseInput = {
     maxImagePixels: 786432,
     groupingMethod: "slic" as const,
     segmentationStrategy: "slic" as const,
-    hierarchyMethod: "iterative_graph_agglomerative" as const,
+    hierarchyMethod: "global_energy_merge_tree" as const,
     maxAgglomerationIterations: 2048,
+    mergeEnergyThreshold: 0,
+    mergeEnergyWeights: { distortion: 1, rate: 0.06, boundary: 0.45, shape: 0.18, complexity: 0.12 },
+    derivedCutTargetFractions: { region: 0.5, composite: 0.25, entity: 0.1 },
     scaleLevels: [1, 2, 4, 8],
     slicSegments: 72,
     slicCompactness: 10,
@@ -28,6 +31,9 @@ const baseInput = {
     runScaleConsistency: true,
     maxConsistencyPixels: 786432,
     crossScaleOverlapThreshold: 0.20,
+    labDeltaESigma: 22,
+    boundaryGradientPercentile: 99,
+    topology: "4-neighbour" as const,
     graphK: 3,
     mergeThreshold: 0.58,
     edgeBarrierThreshold: 0.70,
@@ -52,8 +58,8 @@ const userContext = { user: { id: 1, role: "user" } } as never;
 describe("imageAnalysis router", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("invokes the child-process bridge through an authenticated typed v0.6 request", async () => {
-    vi.mocked(analyzeImage).mockResolvedValue({ jobId: "job-123", ownerId: "1", representation: { version: "0.6.0" }, artifactUrls: { representationJson: "/manus-storage/result.json", featuresNpz: "/manus-storage/features.npz", reconstructedPng: "/manus-storage/reconstructed.png", svg: "/manus-storage/reconstruction.svg", overlays: {}, reconstructions: {}, errors: {} } });
+  it("invokes the child-process bridge through an authenticated typed v0.7 request", async () => {
+    vi.mocked(analyzeImage).mockResolvedValue({ jobId: "job-123", ownerId: "1", representation: { version: "0.7.0" }, artifactUrls: { representationJson: "/manus-storage/result.json", featuresNpz: "/manus-storage/features.npz", reconstructedPng: "/manus-storage/reconstructed.png", svg: "/manus-storage/reconstruction.svg", overlays: {}, reconstructions: {}, errors: {} } });
     const caller = imageAnalysisRouter.createCaller(userContext);
     const response = await caller.process(baseInput);
 
