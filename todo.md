@@ -114,3 +114,6 @@
 - [x] Add an accessible swipe comparison slider that layers the original and selected reconstruction artifacts without client-side image processing.
 - [x] Display selected-output PSNR and clearly labeled residual correction coverage in the comparative results view.
 - [x] Add slider interaction, selected-artifact routing, and responsive comparison regressions; validate, checkpoint, synchronize, and deliver the enhancement.
+- [x] Separate the persistent original-input and reconstructed-output panels from the optional swipe comparison card.
+- [x] Add a controllable server-generated absolute-error heatmap overlay, opacity control, legend, and unavailable state to the reconstruction panel.
+- [x] Add separated-view and heatmap artifact-routing regressions; validate, checkpoint, synchronize, and deliver the enhanced inspection workflow.
