@@ -2,8 +2,10 @@ import { spawn } from "child_process";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { gunzipSync } from "zlib";
 import { nanoid } from "nanoid";
-import { storagePut } from "./storage";
+import { PNG } from "pngjs";
+import { storageGetSignedUrl, storagePut } from "./storage";
 
 export type AnalysisConfig = {
   maxFileSizeBytes: number;
@@ -77,6 +79,7 @@ export type AnalysisResult = {
   ownerId: string;
   representation: Record<string, unknown>;
   artifactUrls: AnalysisArtifactUrls;
+  errorEvidence?: Record<string, { key: string; width: number; height: number }>;
 };
 
 export type AnalysisJobStatus = {
@@ -120,6 +123,10 @@ const DEFAULT_RESULT_CACHE_CAPACITY = 100;
 const DEFAULT_SUBMISSION_WINDOW_MS = 60 * 1000;
 const DEFAULT_SUBMISSION_MAX_PER_WINDOW = 3;
 const DEFAULT_MAX_INFLIGHT_ANALYSES = 2;
+const ERROR_HEATMAP_REFERENCE_DELTA = 32;
+const MAX_THRESHOLD_HEATMAPS = 96;
+const decodedErrorEvidence = new Map<string, { width: number; height: number; values: Uint16Array }>();
+const thresholdedHeatmapUrls = new Map<string, string>();
 
 function positiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -361,11 +368,75 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
   });
 }
 
-async function uploadArtifact(jobId: string, outputPath: string, relativePath: string, contentType: string) {
+async function uploadArtifactRecord(jobId: string, outputPath: string, relativePath: string, contentType: string) {
   const buffer = await fs.readFile(path.join(outputPath, relativePath));
   const key = `hierarchical-image-representation/${jobId}/${relativePath}`;
-  const uploaded = await storagePut(key, buffer, contentType);
-  return uploaded.url;
+  return storagePut(key, buffer, contentType);
+}
+
+async function uploadArtifact(jobId: string, outputPath: string, relativePath: string, contentType: string) {
+  return (await uploadArtifactRecord(jobId, outputPath, relativePath, contentType)).url;
+}
+
+function boundedSet<T>(map: Map<string, T>, key: string, value: T, capacity: number) {
+  map.delete(key); map.set(key, value);
+  while (map.size > capacity) map.delete(map.keys().next().value as string);
+}
+
+async function loadErrorEvidence(evidence: { key: string; width: number; height: number }) {
+  const cached = decodedErrorEvidence.get(evidence.key);
+  if (cached) return cached;
+  const signedUrl = await storageGetSignedUrl(evidence.key);
+  const response = await fetch(signedUrl);
+  if (!response.ok) throw new Error("The private error-evidence artifact could not be loaded.");
+  const payload = gunzipSync(Buffer.from(await response.arrayBuffer()));
+  const width = payload.readUInt32LE(0); const height = payload.readUInt32LE(4);
+  if (width !== evidence.width || height !== evidence.height || payload.length !== 8 + width * height * 2) throw new Error("The private error-evidence artifact is malformed.");
+  const values = new Uint16Array(width * height);
+  for (let index = 0; index < values.length; index += 1) values[index] = payload.readUInt16LE(8 + index * 2);
+  const decoded = { width, height, values };
+  boundedSet(decodedErrorEvidence, evidence.key, decoded, DEFAULT_RESULT_CACHE_CAPACITY * 8);
+  return decoded;
+}
+
+function heatmapColor(value: number) {
+  const t = Math.max(0, Math.min(1, value / ERROR_HEATMAP_REFERENCE_DELTA));
+  return t < 0.5 ? [Math.round(90 * t * 2), Math.round(24 * t * 2), Math.round(120 + 120 * t * 2)] : [Math.round(180 + 75 * (t - 0.5) * 2), Math.round(48 + 180 * (t - 0.5) * 2), Math.round(240 - 200 * (t - 0.5) * 2)];
+}
+
+function requirePrivateErrorEvidence(jobId: string, ownerId: string, mode: string) {
+  const result = getAnalysisResult(jobId);
+  if (!result || result.ownerId !== ownerId) throw new Error("This analysis result is not available to the current user.");
+  const evidence = result.errorEvidence?.[mode];
+  if (!evidence) throw new Error("Exact error evidence is unavailable for the selected reconstruction.");
+  return { result, evidence };
+}
+
+export async function getLocalErrorSample(jobId: string, ownerId: string, mode: string, x: number, y: number) {
+  const { evidence } = requirePrivateErrorEvidence(jobId, ownerId, mode);
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= evidence.width || y >= evidence.height) throw new Error("Requested error coordinate is outside the reconstruction bounds.");
+  const decoded = await loadErrorEvidence(evidence);
+  const channelSum = decoded.values[y * decoded.width + x] ?? 0;
+  return { mode, x, y, meanAbsoluteDeltaRgb: channelSum / 3, referenceMeanAbsoluteRgbDelta: ERROR_HEATMAP_REFERENCE_DELTA };
+}
+
+export async function getThresholdedErrorHeatmap(jobId: string, ownerId: string, mode: string, thresholdDelta: number) {
+  if (!Number.isFinite(thresholdDelta) || thresholdDelta < 0 || thresholdDelta > ERROR_HEATMAP_REFERENCE_DELTA) throw new Error("Heatmap threshold must be between 0 and 32 ΔRGB.");
+  const threshold = Math.round(thresholdDelta);
+  const { evidence } = requirePrivateErrorEvidence(jobId, ownerId, mode);
+  const cacheKey = `${jobId}:${mode}:${threshold}`;
+  const cached = thresholdedHeatmapUrls.get(cacheKey);
+  if (cached) return { mode, thresholdDelta: threshold, url: cached, referenceMeanAbsoluteRgbDelta: ERROR_HEATMAP_REFERENCE_DELTA };
+  const decoded = await loadErrorEvidence(evidence);
+  const png = new PNG({ width: decoded.width, height: decoded.height });
+  for (let index = 0; index < decoded.values.length; index += 1) {
+    const delta = (decoded.values[index] ?? 0) / 3; const offset = index * 4; const [r, g, b] = heatmapColor(delta);
+    png.data[offset] = r; png.data[offset + 1] = g; png.data[offset + 2] = b;
+    png.data[offset + 3] = delta <= threshold ? 0 : Math.round(Math.pow((delta - threshold) / Math.max(ERROR_HEATMAP_REFERENCE_DELTA - threshold, 1), 0.75) * 255);
+  }
+  const uploaded = await storagePut(`hierarchical-image-representation/${jobId}/errors/thresholded/${mode}-${threshold}.png`, PNG.sync.write(png), "image/png");
+  boundedSet(thresholdedHeatmapUrls, cacheKey, uploaded.url, MAX_THRESHOLD_HEATMAPS);
+  return { mode, thresholdDelta: threshold, url: uploaded.url, referenceMeanAbsoluteRgbDelta: ERROR_HEATMAP_REFERENCE_DELTA };
 }
 
 export async function analyzeImage(input: {
@@ -427,6 +498,13 @@ export async function analyzeImage(input: {
       residualEnergy: await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png"),
       byReconstruction,
     };
+    const evidenceMetadata = (((representation.artifacts as { errors?: { evidenceByReconstruction?: Record<string, { artifact?: string; width?: number; height?: number }> } } | undefined)?.errors?.evidenceByReconstruction) ?? {});
+    const errorEvidence = Object.fromEntries(await Promise.all(Object.entries(evidenceMetadata).map(async ([mode, metadata]) => {
+      const width = metadata.width; const height = metadata.height;
+      if (!metadata.artifact || typeof width !== "number" || typeof height !== "number" || !Number.isInteger(width) || !Number.isInteger(height)) throw new Error(`Missing exact error evidence for reconstruction mode ${mode}.`);
+      const uploaded = await uploadArtifactRecord(jobId, outputPath, metadata.artifact, "application/gzip");
+      return [mode, { key: uploaded.key, width, height }] as const;
+    })));
     const residualArtifact = (representation.artifacts as { residuals?: string | null } | undefined)?.residuals;
     const sensitivityArtifact = (representation.artifacts as { parameterSensitivity?: string | null } | undefined)?.parameterSensitivity;
     const artifactUrls: AnalysisArtifactUrls = {
@@ -440,7 +518,7 @@ export async function analyzeImage(input: {
       reconstructions,
       errors,
     };
-      const result = { jobId, ownerId, representation, artifactUrls };
+      const result = { jobId, ownerId, representation, artifactUrls, errorEvidence };
       activeResults.remember(result);
       run?.onProgress?.({ status: "uploading", stage: "finalizing", percent: 99, message: "Finalizing owner-scoped analysis results." });
       return result;

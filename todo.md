@@ -122,3 +122,9 @@
 - [x] Ensure heatmap controls never mutate reconstruction selection and only overlay the active reconstruction’s paired error artifact.
 - [x] Retire ambiguous source-panel final-error selection, clarify distinct inspection views, and add mode-routing, calibration, and no-mode-mutation regressions.
 - [x] Validate, checkpoint, synchronize, and deliver the corrected mode-aligned heatmap workflow.
+- [x] Persist compressed exact per-pixel mean-absolute-ΔRGB evidence for every reconstruction mode and generate calibrated thresholded RGBA overlays server-side.
+- [x] Add protected owner-scoped local ΔRGB sampling and thresholded-overlay APIs with coordinate validation and bounded cache behavior.
+- [x] Add reconstruction-panel threshold, calibrated legend, hover, and click-pinned local ΔRGB controls without changing selected reconstruction mode.
+- [x] Add Python, server, and workbench regressions for exact sampling, thresholding, owner isolation, legend semantics, and no-mode-mutation behavior.
+- [x] Add dedicated protected local-error and thresholded-heatmap API regressions for owner isolation and invalid coordinate or threshold rejection.
+- [x] Validate, checkpoint, synchronize, and deliver the interactive local ΔRGB heatmap enhancement.

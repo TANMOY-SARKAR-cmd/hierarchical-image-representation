@@ -6,10 +6,12 @@ vi.mock("../imageAnalysis", () => ({
   getAnalysisCacheTelemetry: vi.fn(),
   getAnalysisJob: vi.fn(),
   getAnalysisResult: vi.fn(),
+  getLocalErrorSample: vi.fn(),
+  getThresholdedErrorHeatmap: vi.fn(),
   startAnalysisJob: vi.fn(),
 }));
 
-import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, startAnalysisJob } from "../imageAnalysis";
+import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, getLocalErrorSample, getThresholdedErrorHeatmap, startAnalysisJob } from "../imageAnalysis";
 import { imageAnalysisRouter } from "./imageAnalysis";
 
 const baseInput = {
@@ -112,6 +114,18 @@ describe("imageAnalysis router", () => {
     await expect(owner.artifacts({ jobId: "job-123" })).resolves.toMatchObject({ svg: "/reconstruction.svg" });
     await expect(otherUser.result({ jobId: "job-123" })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(otherUser.artifacts({ jobId: "job-123" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("returns exact local ΔRGB and thresholded overlays through protected validated procedures", async () => {
+    vi.mocked(getLocalErrorSample).mockResolvedValue({ mode: "parametric", x: 3, y: 4, meanAbsoluteDeltaRgb: 12.3333333333, referenceMeanAbsoluteRgbDelta: 32 });
+    vi.mocked(getThresholdedErrorHeatmap).mockResolvedValue({ mode: "parametric", thresholdDelta: 8, url: "/thresholded.png", referenceMeanAbsoluteRgbDelta: 32 });
+    const owner = imageAnalysisRouter.createCaller(userContext);
+    await expect(owner.localError({ jobId: "job-123", mode: "parametric", x: 3, y: 4 })).resolves.toMatchObject({ meanAbsoluteDeltaRgb: 12.3333333333 });
+    await expect(owner.thresholdedHeatmap({ jobId: "job-123", mode: "parametric", thresholdDelta: 8 })).resolves.toMatchObject({ url: "/thresholded.png" });
+    expect(getLocalErrorSample).toHaveBeenCalledWith("job-123", "1", "parametric", 3, 4);
+    expect(getThresholdedErrorHeatmap).toHaveBeenCalledWith("job-123", "1", "parametric", 8);
+    await expect(owner.localError({ jobId: "job-123", mode: "parametric", x: -1, y: 4 } as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(owner.thresholdedHeatmap({ jobId: "job-123", mode: "parametric", thresholdDelta: 33 } as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("returns aggregate cache telemetry only to administrators", async () => {

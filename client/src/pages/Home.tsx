@@ -152,6 +152,10 @@ function ImageComparisonSlider({ sourceUrl, reconstructionUrl, position, onPosit
   </div>;
 }
 
+function HeatmapInspector({ available, visible, onToggle, opacity, onOpacityChange, threshold, onThresholdChange, mode, reference, sample, pinned }: { available: boolean; visible: boolean; onToggle: () => void; opacity: number; onOpacityChange: (value: number) => void; threshold: number; onThresholdChange: (value: number) => void; mode: string; reference: number; sample: { x: number; y: number; meanAbsoluteDeltaRgb: number } | undefined; pinned: boolean }) {
+  return <div className="mb-2 rounded border border-amber-300/15 bg-amber-300/[0.035] p-2"><div className="flex items-center justify-between gap-2"><Button type="button" variant="outline" size="sm" disabled={!available} onClick={onToggle} className={cn("h-6 border-amber-300/20 px-2 font-mono text-[9px]", visible ? "bg-amber-300/15 text-amber-100" : "text-slate-500")}>ERROR HEATMAP {visible ? "ON" : "OFF"}</Button><span className="font-mono text-[9px] text-amber-100">{available ? `${Math.round(opacity * 100)}%` : "NO MAP"}</span></div><div className={cn("mt-2", (!visible || !available) && "opacity-40")}><Label className="flex justify-between text-[10px] text-slate-400"><span>Error threshold</span><span>ΔRGB {threshold}</span></Label><input type="range" aria-label="Error threshold" min="0" max={reference} value={threshold} onChange={event => onThresholdChange(Number(event.target.value))} disabled={!visible || !available} className="mt-1 h-1.5 w-full cursor-pointer accent-amber-300" /><Label className="mt-2 flex justify-between text-[10px] text-slate-400"><span>Heatmap opacity</span><span>{Math.round(opacity * 100)}%</span></Label><input type="range" aria-label="Error heatmap opacity" min="0" max="100" value={Math.round(opacity * 100)} onChange={event => onOpacityChange(Number(event.target.value) / 100)} disabled={!visible || !available} className="mt-1 h-1.5 w-full cursor-pointer accent-amber-300" /></div><div className="mt-2"><div className="h-2 rounded bg-[linear-gradient(90deg,transparent_0%,#2d0a4d_12%,#7b1d5a_35%,#df6338_65%,#f7d13d_100%)]" /><div className="mt-1 flex justify-between font-mono text-[8px] text-slate-500"><span>0</span><span>hide ≤ {threshold}</span><span>ΔRGB {Math.round(reference / 2)}</span><span>ΔRGB {reference}+</span></div></div><p className="mt-2 text-[10px] leading-relaxed text-slate-500">Paired with {mode.toUpperCase()}. Hover for exact server-measured mean absolute ΔRGB; click to pin.</p>{sample ? <p className="mt-1 font-mono text-[9px] text-amber-100">{pinned ? "PINNED" : "HOVER"} ({sample.x}, {sample.y}) · ΔRGB {sample.meanAbsoluteDeltaRgb.toFixed(0)}</p> : null}</div>;
+}
+
 function getDataBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -300,6 +304,11 @@ export default function Home() {
   const [comparisonPosition, setComparisonPosition] = useState(50);
   const [showErrorHeatmap, setShowErrorHeatmap] = useState(false);
   const [errorHeatmapOpacity, setErrorHeatmapOpacity] = useState(0.64);
+  const [errorThresholdDelta, setErrorThresholdDelta] = useState(1);
+  const [debouncedErrorThresholdDelta, setDebouncedErrorThresholdDelta] = useState(1);
+  const [hoverErrorCoordinate, setHoverErrorCoordinate] = useState<{ x: number; y: number } | null>(null);
+  const [pinnedErrorCoordinate, setPinnedErrorCoordinate] = useState<{ x: number; y: number } | null>(null);
+  const hoverErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedRelationshipTypes, setSelectedRelationshipTypes] = useState<string[]>([]);
   const [adjacentOnly, setAdjacentOnly] = useState(false);
   const [minimumConfidence, setMinimumConfidence] = useState(0);
@@ -308,6 +317,7 @@ export default function Home() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [appliedResultJobId, setAppliedResultJobId] = useState<string | null>(null);
   const [reportedFailureJobId, setReportedFailureJobId] = useState<string | null>(null);
+  const pairedErrorHeatmapUrl = artifacts?.errors.byReconstruction?.[reconstructionLevel] ?? null;
   const startMutation = trpc.imageAnalysis.start.useMutation();
   const statusQuery = trpc.imageAnalysis.status.useQuery({ jobId: activeJobId ?? "pending-job" }, { enabled: Boolean(activeJobId), refetchInterval: query => {
     const status = query.state.data as AnalysisJobStatus | undefined;
@@ -315,6 +325,9 @@ export default function Home() {
   }, refetchOnWindowFocus: false, retry: false });
   const jobStatus = statusQuery.data as AnalysisJobStatus | undefined;
   const resultQuery = trpc.imageAnalysis.result.useQuery({ jobId: activeJobId ?? "pending-job" }, { enabled: Boolean(activeJobId && jobStatus?.resultAvailable), refetchOnWindowFocus: false, retry: false });
+  const thresholdedHeatmapQuery = trpc.imageAnalysis.thresholdedHeatmap.useQuery({ jobId: activeJobId ?? "pending-job", mode: reconstructionLevel, thresholdDelta: debouncedErrorThresholdDelta }, { enabled: Boolean(activeJobId && showErrorHeatmap && pairedErrorHeatmapUrl), refetchOnWindowFocus: false, retry: false });
+  const inspectedErrorCoordinate = pinnedErrorCoordinate ?? hoverErrorCoordinate;
+  const localErrorQuery = trpc.imageAnalysis.localError.useQuery({ jobId: activeJobId ?? "pending-job", mode: reconstructionLevel, x: inspectedErrorCoordinate?.x ?? 0, y: inspectedErrorCoordinate?.y ?? 0 }, { enabled: Boolean(activeJobId && pairedErrorHeatmapUrl && inspectedErrorCoordinate), refetchOnWindowFocus: false, retry: false });
   const isAnalyzing = startMutation.isPending || Boolean(jobStatus && jobStatus.status !== "completed" && jobStatus.status !== "failed");
   const telemetryQuery = trpc.imageAnalysis.cacheTelemetry.useQuery(undefined, { enabled: isAdmin, refetchInterval: isAdmin ? 15_000 : false, refetchOnWindowFocus: false });
 
@@ -332,9 +345,9 @@ export default function Home() {
   const reconstructionUrl = artifacts?.reconstructions[reconstructionLevel] ?? artifacts?.reconstructedPng ?? null;
   const selectedReconstructionOutput = representation?.reconstruction_metadata.outputs[reconstructionLevel];
   const residualMetadata = representation?.reconstruction_metadata.residual;
-  const pairedErrorHeatmapUrl = artifacts?.errors.byReconstruction?.[reconstructionLevel] ?? null;
   const activeErrorHeatmap = representation?.reconstruction_metadata.errorHeatmaps?.byReconstruction[reconstructionLevel];
   const heatmapCalibration = representation?.reconstruction_metadata.errorHeatmaps;
+  const displayedErrorHeatmapUrl = thresholdedHeatmapQuery.data?.thresholdDelta === debouncedErrorThresholdDelta ? thresholdedHeatmapQuery.data.url : errorThresholdDelta === 1 ? pairedErrorHeatmapUrl : null;
   const parentChain = useMemo(() => {
     const chain: Entity[] = [];
     let current = selectedEntity?.parentId ? entities.get(selectedEntity.parentId) ?? null : null;
@@ -350,6 +363,16 @@ export default function Home() {
   useEffect(() => {
     setComparisonPosition(50);
   }, [sourceUrl, reconstructionUrl]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedErrorThresholdDelta(errorThresholdDelta), 180);
+    return () => clearTimeout(timeout);
+  }, [errorThresholdDelta]);
+
+  useEffect(() => {
+    setHoverErrorCoordinate(null);
+    setPinnedErrorCoordinate(null);
+  }, [reconstructionLevel, activeJobId]);
 
   useEffect(() => {
     const result = resultQuery.data;
@@ -401,6 +424,24 @@ export default function Home() {
     const nextSourceUrl = URL.createObjectURL(incoming);
     sourceUrlRef.current = nextSourceUrl;
     setSourceUrl(nextSourceUrl);
+  }
+
+  function errorCoordinateFromPointer(event: React.PointerEvent<HTMLDivElement>) {
+    if (!representation) return null;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const imageRatio = representation.image.width / representation.image.height;
+    let contentWidth = rect.width; let contentHeight = contentWidth / imageRatio;
+    if (contentHeight > rect.height) { contentHeight = rect.height; contentWidth = contentHeight * imageRatio; }
+    const left = rect.left + (rect.width - contentWidth) / 2; const top = rect.top + (rect.height - contentHeight) / 2;
+    if (event.clientX < left || event.clientX >= left + contentWidth || event.clientY < top || event.clientY >= top + contentHeight) return null;
+    return { x: Math.min(representation.image.width - 1, Math.max(0, Math.floor(((event.clientX - left) / contentWidth) * representation.image.width))), y: Math.min(representation.image.height - 1, Math.max(0, Math.floor(((event.clientY - top) / contentHeight) * representation.image.height))) };
+  }
+
+  function inspectHeatmapPointer(event: React.PointerEvent<HTMLDivElement>, pin = false) {
+    const coordinate = errorCoordinateFromPointer(event);
+    if (pin) { setPinnedErrorCoordinate(coordinate); return; }
+    if (hoverErrorTimerRef.current) clearTimeout(hoverErrorTimerRef.current);
+    hoverErrorTimerRef.current = setTimeout(() => setHoverErrorCoordinate(coordinate), 90);
   }
 
   async function runAnalysis() {
@@ -555,7 +596,7 @@ export default function Home() {
             {representation ? <div className="flex flex-wrap items-center gap-2 border-b border-white/8 bg-black/15 px-4 py-2.5 font-mono text-[10px]"><span className="rounded border border-cyan-300/20 bg-cyan-300/[0.06] px-2 py-1 text-cyan-100">PSNR {Number(selectedReconstructionOutput?.psnr ?? 0).toFixed(2)} dB</span><span className="rounded border border-emerald-300/20 bg-emerald-300/[0.06] px-2 py-1 text-emerald-100">Pixel correction {residualMetadata?.artifactEmitted ? `${(residualMetadata.coverage * 100).toFixed(1)}%` : "not applied"}</span><span className="text-slate-500">{reconstructionLevel === "residual" ? "DETAIL residual coverage" : "DETAIL correction availability"}</span></div> : null}
             <div className="grid gap-px bg-white/10 md:grid-cols-2">
               <div className="relative min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Original / overlay</span><span className="text-cyan-300">{selectedOverlay === "none" ? "RGB" : selectedOverlay}</span></div>{sourceUrl ? <div className="relative overflow-hidden rounded border border-white/8 bg-black"><img src={sourceUrl} alt="Uploaded source" className="max-h-[480px] w-full object-contain" />{relationshipOverlayActive && representation ? <><GraphEdgeOverlay image={representation.image} entities={entities} relationships={filteredRelationships} distanceMode={selectedOverlay === "normalizedDistanceGraph"} /><div className="absolute bottom-2 left-2 rounded border border-cyan-300/25 bg-slate-950/80 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-cyan-100">{filteredRelationships.length} filtered edges</div></> : overlayUrl ? <img src={overlayUrl} alt="Selected feature overlay" className="absolute inset-0 h-full w-full object-contain opacity-60 mix-blend-screen" /> : null}</div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-cyan-300/15 bg-[linear-gradient(rgba(34,211,238,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.035)_1px,transparent_1px)] bg-[size:24px_24px] text-center"><div className="absolute inset-6 rounded-[38%_62%_55%_45%/45%_38%_62%_55%] border border-cyan-300/10" /><div className="absolute inset-16 rounded-[46%_54%_35%_65%/60%_42%_58%_40%] border border-violet-300/10" /><div className="relative"><Boxes className="mx-auto mb-3 h-8 w-8 text-cyan-500/60" /><p className="text-sm font-medium text-slate-400">Load an image to sample feature fields.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">RGB → gradients → microregions</p></div></div>}</div>
-              <div className="min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Reconstructed output</span><span className="text-emerald-300">{reconstructionLevel === "full" ? "MICRO-REGION MEAN" : reconstructionLevel.toUpperCase()}</span></div><div className="mb-2 rounded border border-amber-300/15 bg-amber-300/[0.035] p-2"><div className="flex items-center justify-between gap-2"><Button type="button" variant="outline" size="sm" disabled={!pairedErrorHeatmapUrl} onClick={() => { if (pairedErrorHeatmapUrl) setShowErrorHeatmap(value => !value); }} className={cn("h-6 border-amber-300/20 px-2 font-mono text-[9px]", showErrorHeatmap ? "bg-amber-300/15 text-amber-100" : "text-slate-500")}>ERROR HEATMAP {showErrorHeatmap ? "ON" : "OFF"}</Button><span className="font-mono text-[9px] text-amber-100">{pairedErrorHeatmapUrl ? `${Math.round(errorHeatmapOpacity * 100)}%` : "NO MAP"}</span></div><div className={cn("mt-2", (!showErrorHeatmap || !pairedErrorHeatmapUrl) && "opacity-40")}><input type="range" aria-label="Error heatmap opacity" min="0" max="100" value={Math.round(errorHeatmapOpacity * 100)} onChange={event => setErrorHeatmapOpacity(Number(event.target.value) / 100)} disabled={!showErrorHeatmap || !pairedErrorHeatmapUrl} className="h-1.5 w-full cursor-pointer accent-amber-300" /></div><p className="mt-2 text-[10px] leading-relaxed text-slate-500">{pairedErrorHeatmapUrl ? <>Paired with {reconstructionLevel.toUpperCase()}. Brighter visible areas indicate greater absolute RGB difference; near-zero differences are transparent{heatmapCalibration ? ` below ΔRGB ${heatmapCalibration.transparentBelowMeanAbsoluteRgbDelta.toFixed(0)} and calibrated to ΔRGB ${heatmapCalibration.referenceMeanAbsoluteRgbDelta.toFixed(0)}` : ""}.</> : "Run an analysis to load a mode-paired calibrated error map."}</p>{activeErrorHeatmap ? <p className="mt-1 font-mono text-[9px] text-amber-100">Measured mean ΔRGB {activeErrorHeatmap.meanAbsoluteRgbDelta.toFixed(2)} · max {activeErrorHeatmap.maxAbsoluteRgbDelta.toFixed(2)}</p> : null}</div>{reconstructionUrl ? <div className="relative overflow-hidden rounded border border-white/8 bg-black"><img src={reconstructionUrl} alt="Hierarchically reconstructed image" className="max-h-[480px] w-full object-contain" />{showErrorHeatmap && pairedErrorHeatmapUrl ? <img src={pairedErrorHeatmapUrl} alt={`${reconstructionLevel} calibrated reconstruction error heatmap overlay`} className="pointer-events-none absolute inset-0 h-full w-full object-contain" style={{ opacity: errorHeatmapOpacity }} /> : null}</div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-emerald-300/15 bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.07),transparent_42%)] text-center"><div className="absolute grid h-32 w-44 grid-cols-4 gap-1 opacity-35">{Array.from({ length: 16 }).map((_, index) => <span key={index} className="rounded-sm border border-emerald-300/30" style={{ transform: `translate(${(index % 3) - 1}px, ${Math.floor(index / 4) % 2 ? 2 : -2}px)` }} />)}</div><div className="relative"><Network className="mx-auto mb-3 h-8 w-8 text-emerald-500/60" /><p className="text-sm font-medium text-slate-400">Decode a region hierarchy to inspect fidelity.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">Regions → mean appearance → PNG / SVG</p></div></div>}</div>
+              <div className="min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Reconstructed output</span><span className="text-emerald-300">{reconstructionLevel === "full" ? "MICRO-REGION MEAN" : reconstructionLevel.toUpperCase()}</span></div><HeatmapInspector available={Boolean(pairedErrorHeatmapUrl)} visible={showErrorHeatmap} onToggle={() => pairedErrorHeatmapUrl && setShowErrorHeatmap(value => !value)} opacity={errorHeatmapOpacity} onOpacityChange={setErrorHeatmapOpacity} threshold={errorThresholdDelta} onThresholdChange={setErrorThresholdDelta} mode={reconstructionLevel} reference={heatmapCalibration?.referenceMeanAbsoluteRgbDelta ?? 32} sample={localErrorQuery.data} pinned={Boolean(pinnedErrorCoordinate)} />{reconstructionUrl ? <div className="relative overflow-hidden rounded border border-white/8 bg-black" onPointerMove={showErrorHeatmap && displayedErrorHeatmapUrl ? event => inspectHeatmapPointer(event) : undefined} onPointerLeave={() => { if (!pinnedErrorCoordinate) setHoverErrorCoordinate(null); }} onPointerUp={showErrorHeatmap && displayedErrorHeatmapUrl ? event => inspectHeatmapPointer(event, true) : undefined}><img src={reconstructionUrl} alt="Hierarchically reconstructed image" className="max-h-[480px] w-full object-contain" />{showErrorHeatmap && displayedErrorHeatmapUrl ? <img src={displayedErrorHeatmapUrl} alt={`${reconstructionLevel} thresholded reconstruction error heatmap overlay`} className="pointer-events-none absolute inset-0 h-full w-full object-contain" style={{ opacity: errorHeatmapOpacity }} /> : null}</div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-emerald-300/15 bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.07),transparent_42%)] text-center"><div className="relative"><Network className="mx-auto mb-3 h-8 w-8 text-emerald-500/60" /><p className="text-sm font-medium text-slate-400">Decode a region hierarchy to inspect fidelity.</p></div></div>}</div>
             </div>
           </section>
 

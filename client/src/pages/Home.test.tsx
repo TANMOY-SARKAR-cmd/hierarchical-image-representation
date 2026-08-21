@@ -7,6 +7,8 @@ const startMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn()
 const jobStatusQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const resultQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const telemetryQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
+const thresholdedHeatmapQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
+const localErrorQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const authState = vi.hoisted(() => ({ user: null as { role: string } | null }));
 const startLogin = vi.hoisted(() => vi.fn());
 
@@ -16,6 +18,8 @@ vi.mock("@/lib/trpc", () => ({
       start: { useMutation: () => startMutation },
       status: { useQuery: (input: { jobId: string }) => input.jobId === "job-1" ? jobStatusQuery : { data: undefined, isLoading: false } },
       result: { useQuery: (input: { jobId: string }) => input.jobId === "job-1" ? resultQuery : { data: undefined, isLoading: false } },
+      thresholdedHeatmap: { useQuery: () => thresholdedHeatmapQuery },
+      localError: { useQuery: () => localErrorQuery },
       cacheTelemetry: { useQuery: () => telemetryQuery },
     },
   },
@@ -51,6 +55,8 @@ describe("Hierarchy workbench UI", () => {
     startMutation.mutateAsync.mockReset();
     jobStatusQuery.data = undefined;
     resultQuery.data = undefined;
+    thresholdedHeatmapQuery.data = undefined;
+    localErrorQuery.data = undefined;
     startLogin.mockReset();
     telemetryQuery.data = undefined;
     telemetryQuery.isLoading = false;
@@ -184,7 +190,7 @@ describe("Hierarchy workbench UI", () => {
     expect(view.getAllByText("PSNR 30.20 dB").length).toBeGreaterThan(0);
     expect(view.getByText(/parametric evidence/i)).toBeInTheDocument();
     fireEvent.click(view.getByRole("button", { name: /error heatmap off/i }));
-    expect(view.getByAltText("parametric calibrated reconstruction error heatmap overlay")).toHaveAttribute("src", "/heatmap-parametric.png");
+    expect(view.getByAltText("parametric thresholded reconstruction error heatmap overlay")).toHaveAttribute("src", "/heatmap-parametric.png");
     expect(view.getByAltText("PARAMETRIC reconstruction")).toHaveAttribute("src", "/parametric.png");
     expect(view.getByText(/Paired with PARAMETRIC/i)).toBeInTheDocument();
     fireEvent.click(view.getByRole("button", { name: /error heatmap on/i }));
@@ -199,9 +205,12 @@ describe("Hierarchy workbench UI", () => {
     const errorOpacity = view.getByRole("slider", { name: "Error heatmap opacity" });
     expect(errorOpacity).toBeDisabled();
     fireEvent.click(view.getByRole("button", { name: /error heatmap off/i }));
-    expect(view.getByAltText("residual calibrated reconstruction error heatmap overlay")).toHaveAttribute("src", "/heatmap-residual.png");
+    expect(view.getByAltText("residual thresholded reconstruction error heatmap overlay")).toHaveAttribute("src", "/heatmap-residual.png");
     expect(view.getByAltText("RESIDUAL reconstruction")).toHaveAttribute("src", "/residual.png");
     expect(errorOpacity).toBeEnabled();
+    expect(view.getByRole("slider", { name: "Error threshold" })).toHaveValue("1");
+    expect(view.getByText(/hide ≤ 1/i)).toBeInTheDocument();
+    expect(view.getByText(/ΔRGB 16/i)).toBeInTheDocument();
     fireEvent.change(errorOpacity, { target: { value: "28" } });
     expect(errorOpacity).toHaveValue("28");
 

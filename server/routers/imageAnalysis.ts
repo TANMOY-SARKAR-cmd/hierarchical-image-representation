@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, startAnalysisJob } from "../imageAnalysis";
+import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, getLocalErrorSample, getThresholdedErrorHeatmap, startAnalysisJob } from "../imageAnalysis";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 
 const analysisConfig = z.object({
@@ -74,7 +74,8 @@ export const imageAnalysisRouter = router({
     .input(analysisInput)
     .mutation(async ({ input, ctx }) => {
       try {
-        return await analyzeImage(input, String(ctx.user.id), admissionKey(ctx));
+        const { errorEvidence: _privateEvidence, ...publicResult } = await analyzeImage(input, String(ctx.user.id), admissionKey(ctx));
+        return publicResult;
       } catch (error) {
         if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
         throw new TRPCError({
@@ -101,7 +102,22 @@ export const imageAnalysisRouter = router({
     if (!result || result.ownerId !== String(ctx.user.id)) {
       throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
     }
-    return result;
+    const { errorEvidence: _privateEvidence, ...publicResult } = result;
+    return publicResult;
+  }),
+  localError: protectedProcedure.input(z.object({ jobId: z.string().min(1), mode: z.string().min(1).max(32), x: z.number().int().min(0).max(2_000_000), y: z.number().int().min(0).max(2_000_000) })).query(async ({ input, ctx }) => {
+    try {
+      return await getLocalErrorSample(input.jobId, String(ctx.user.id), input.mode, input.x, input.y);
+    } catch (error) {
+      throw new TRPCError({ code: "NOT_FOUND", message: error instanceof Error ? error.message : "Exact error evidence is unavailable." });
+    }
+  }),
+  thresholdedHeatmap: protectedProcedure.input(z.object({ jobId: z.string().min(1), mode: z.string().min(1).max(32), thresholdDelta: z.number().int().min(0).max(32) })).query(async ({ input, ctx }) => {
+    try {
+      return await getThresholdedErrorHeatmap(input.jobId, String(ctx.user.id), input.mode, input.thresholdDelta);
+    } catch (error) {
+      throw new TRPCError({ code: "NOT_FOUND", message: error instanceof Error ? error.message : "Thresholded error heatmap is unavailable." });
+    }
   }),
   entity: protectedProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1) })).query(({ input, ctx }) => {
     const result = getAnalysisResult(input.jobId);
