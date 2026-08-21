@@ -90,4 +90,4 @@
 - [x] Require authenticated owner-scoped analysis creation and inspection, with strict per-owner result access tests.
 - [x] Consolidate the active Python CLI path, remove stale active configuration, and retain only documented compatibility shims.
 - [x] Add a deterministic parameter-sensitivity evidence harness and workbench inspection/export access.
-- [ ] Update tests, documentation, validation, checkpointing, synchronization, and delivery for v0.6.
+- [x] Update tests, documentation, validation, checkpointing, synchronization, and delivery for v0.6.
