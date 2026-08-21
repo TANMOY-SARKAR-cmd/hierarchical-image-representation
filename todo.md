@@ -102,3 +102,5 @@
 - [x] Update server contracts, workbench inspection, benchmark comparisons, regression tests, and documentation for v0.7.
 - [x] Update the README and user-facing documentation so they identify the active v0.7 energy-tree contract rather than superseded iterative agglomeration.
 - [x] Validate, checkpoint, synchronize, and deliver the completed v0.7 hybrid energy-tree redesign.
+- [x] Replace non-unique relationship-list React keys with collision-safe identifiers and add a regression test covering multiple edges with the same endpoints.
+- [x] Render duplicate-endpoint relationship rows in the workbench regression and assert React emits no duplicate-key warning.

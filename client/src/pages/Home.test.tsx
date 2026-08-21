@@ -22,7 +22,7 @@ vi.mock("@/const", () => ({ startLogin }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-import Home, { filterRelationships } from "./Home";
+import Home, { filterRelationships, relationshipRenderKey } from "./Home";
 
 const baseRelationship = { sourceId: "micro-1", targetId: "micro-2", distance: 8, angle: 0, sizeRatio: 1, colorDistance: 2, colorSimilarity: 0.95, shapeSimilarity: 0.9, textureSimilarity: 0.8, brightnessDifference: 0.02, brightnessRatio: 1.02, normalizedDx: 0.05, normalizedDy: 0, boundaryContactRatio: 0.25, containmentRatio: 0, overlapRatio: 0, containment: "none" };
 const makeEntity = (id: string, children: string[] = []) => ({ id, type: id === "image-root" ? "image" : "micro_region", level: id === "image-root" ? 5 : 1, scaleFactor: 1, geometry: { boundingBox: [0, 0, 10, 10], centroid: id === "micro-1" ? [4, 4] : [12, 12], area: 64, perimeter: 32, orientation: 0, compactness: 0.7 }, appearance: { meanRGB: [20, 140, 210], brightness: 0.52, varianceRGB: [1, 1, 1] }, appearanceModel: { schema: "AppearanceModel@0.5", model: "affine", parameterCount: 9, mseLab: 0.004, selectionScore: 0.008, boundaryResidual: 0.001, coefficients: [] }, statistics: { memberPixelCount: 64, complexity: 0.4 }, vector: { schema: "RegionVector@0.5", dimension: 20, values: Array.from({ length: 20 }, () => 0), provenance: "pixel_aggregate", aggregation: "mean" }, memberPixels: [], children, parentId: id === "image-root" ? null : "image-root", crossScaleMatchId: null });
@@ -84,6 +84,30 @@ describe("Hierarchy workbench UI", () => {
     ];
     expect(filterRelationships(relationships, { relationshipTypes: ["near"], adjacentOnly: false, minimumConfidence: 0.5, maximumNormalizedDistance: 0.25 })).toEqual([relationships[0]]);
     expect(filterRelationships(relationships, { relationshipTypes: [], adjacentOnly: true, minimumConfidence: 0, maximumNormalizedDistance: 1 })).toEqual([relationships[0]]);
+  });
+
+  it("creates unique render keys for relationship edges that share the same endpoints", () => {
+    const first = { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent"], primaryType: "adjacent", adjacent: true };
+    const second = { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent"], primaryType: "adjacent", adjacent: true };
+    const keys = [relationshipRenderKey(first, 0, "entity-inspector"), relationshipRenderKey(second, 1, "entity-inspector")];
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("renders duplicate-endpoint relationships without a React duplicate-key warning", async () => {
+    const first = { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent"], primaryType: "adjacent", adjacent: true };
+    const second = { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent"], primaryType: "adjacent", adjacent: true };
+    authState.user = { role: "user" };
+    processMutation.mutateAsync.mockResolvedValue({ ...completedResult, representation: { ...completedResult.representation, relationships: [first, second] } });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const view = render(<Home />);
+      fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
+      fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
+      await view.findByText("Relationships · 2");
+      expect(consoleError.mock.calls.flat().join(" ")).not.toMatch(/same key|unique key/i);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("revokes the previously owned source-preview URL before replacing a selected file", () => {
