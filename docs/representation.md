@@ -87,6 +87,19 @@ For a reconstruction mode `m`, the stored rate-distortion score is `RD(m) = dist
 
 Completed result metadata is held in the server process only for interactive inspection. The default retention policy is a 30-minute TTL and a 100-result oldest-first capacity. `ANALYSIS_RESULT_TTL_MS` and `ANALYSIS_RESULT_CACHE_CAPACITY` may override these values when set to positive integers. Expired or evicted result metadata returns the existing not-found response; immutable exported artifacts remain available through their storage URLs.
 
+## Cache-Retention Telemetry
+
+The admin-only `imageAnalysis.cacheTelemetry` procedure reports process-local, aggregate cache behavior for operational monitoring. The workbench polls it every 15 seconds only for an authenticated administrator. The telemetry card does not render or request operational data for non-administrative visitors.
+
+| Field | Interpretation |
+|---|---|
+| `activeEntries`, `capacity`, `fillRatio` | Current retained-result pressure. The workbench presents an amber warning at 80% fill or after a capacity eviction. |
+| `writes`, `lookups`, `hits`, `misses`, `hitRate` | Lifetime aggregate cache effectiveness since this server process started. `hitRate` is zero before the first lookup. |
+| `expiredEvictions`, `capacityEvictions`, `totalEvictions` | Removals caused by TTL, oldest-first capacity pressure, and their aggregate total. |
+| `ttlMs`, `processStartedAt`, `lastActivityAt` | Active retention policy and process-local lifecycle context. The counter window resets when the server restarts. |
+
+Telemetry intentionally excludes job IDs, file names, source images, user data, artifact URLs, individual event history, and cached representation contents. It is an in-memory monitoring aid rather than a persistent analytics system; deployment restarts and separate server instances maintain independent counter windows.
+
 ## Privacy, Limitations, and Deferred Work
 
 The user-supplied visual acceptance fixtures are private evaluation material. They remain outside version control and are not used for semantic inference, training, classification, identity processing, or generated content. The engine analyses only the pixels supplied to a server-side run and writes its inspectable artifacts for that run.

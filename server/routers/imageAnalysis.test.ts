@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../imageAnalysis", () => ({
   analyzeImage: vi.fn(),
+  getAnalysisCacheTelemetry: vi.fn(),
   getAnalysisResult: vi.fn(),
 }));
 
-import { analyzeImage, getAnalysisResult } from "../imageAnalysis";
+import { analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
 import { imageAnalysisRouter } from "./imageAnalysis";
 
 const baseInput = {
@@ -91,5 +92,16 @@ describe("imageAnalysis router", () => {
     await expect(caller.hierarchy({ jobId: "job-123" })).resolves.toMatchObject({ hierarchy: { rootId: "root" }, pixelLevel: { assignmentKey: "pixelToMicroregion" } });
     await expect(caller.relationships({ jobId: "job-123", entityId: "region-1" })).resolves.toHaveLength(1);
     await expect(caller.artifacts({ jobId: "job-123" })).resolves.toMatchObject({ svg: "/reconstruction.svg" });
+  });
+
+  it("returns aggregate cache telemetry only to administrators", async () => {
+    const telemetry = { scope: "process_local_aggregate", activeEntries: 8, capacity: 100, ttlMs: 1_800_000, fillRatio: 0.08, writes: 10, lookups: 14, hits: 9, misses: 5, hitRate: 9 / 14, expiredEvictions: 2, capacityEvictions: 0, totalEvictions: 2, processStartedAt: 1_000, lastActivityAt: 2_000 };
+    vi.mocked(getAnalysisCacheTelemetry).mockReturnValue(telemetry);
+    const adminCaller = imageAnalysisRouter.createCaller({ user: { role: "admin" } } as never);
+    const userCaller = imageAnalysisRouter.createCaller({ user: { role: "user" } } as never);
+
+    await expect(adminCaller.cacheTelemetry()).resolves.toEqual(telemetry);
+    expect(getAnalysisCacheTelemetry).toHaveBeenCalledTimes(1);
+    await expect(userCaller.cacheTelemetry()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

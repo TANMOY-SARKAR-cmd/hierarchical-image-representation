@@ -4,14 +4,19 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const processMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
+const telemetryQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
+const authState = vi.hoisted(() => ({ user: null as { role: string } | null }));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     imageAnalysis: {
       process: { useMutation: () => processMutation },
+      cacheTelemetry: { useQuery: () => telemetryQuery },
     },
   },
 }));
+
+vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => authState }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -38,6 +43,9 @@ describe("Hierarchy workbench UI", () => {
 
   beforeEach(() => {
     processMutation.mutateAsync.mockReset();
+    telemetryQuery.data = undefined;
+    telemetryQuery.isLoading = false;
+    authState.user = null;
     class TestResizeObserver { observe() {} unobserve() {} disconnect() {} }
     class TestFileReader { result = "data:image/png;base64,ZmFrZQ=="; onload: (() => void) | null = null; onerror: (() => void) | null = null; readAsDataURL() { this.onload?.(); } }
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
@@ -81,6 +89,16 @@ describe("Hierarchy workbench UI", () => {
     fireEvent.change(fileInput, { target: { files: [new File(["first"], "first.png", { type: "image/png" })] } });
     fireEvent.change(fileInput, { target: { files: [new File(["second"], "second.png", { type: "image/png" })] } });
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:fixture");
+  });
+
+  it("renders aggregate runtime telemetry only for an administrator", () => {
+    authState.user = { role: "admin" };
+    telemetryQuery.data = { scope: "process_local_aggregate", activeEntries: 82, capacity: 100, ttlMs: 1_800_000, fillRatio: 0.82, writes: 91, lookups: 120, hits: 108, misses: 12, hitRate: 0.9, expiredEvictions: 3, capacityEvictions: 2, totalEvictions: 5, processStartedAt: 1_000, lastActivityAt: 2_000 };
+    render(<Home />);
+    expect(screen.getByText("Runtime telemetry")).toBeInTheDocument();
+    expect(screen.getByText("82 / 100")).toBeInTheDocument();
+    expect(screen.getByText("90.0%")).toBeInTheDocument();
+    expect(screen.getByText(/cache capacity pressure is present/i)).toBeInTheDocument();
   });
 
   it("applies interactive edge controls and resets the filtered graph", async () => {

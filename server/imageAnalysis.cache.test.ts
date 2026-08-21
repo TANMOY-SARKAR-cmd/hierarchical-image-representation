@@ -22,4 +22,41 @@ describe("AnalysisResultCache", () => {
     expect(cache.get("second", 4)?.jobId).toBe("second");
     expect(cache.get("third", 4)?.jobId).toBe("third");
   });
+
+  it("reports aggregate retention activity without exposing result identifiers", () => {
+    const cache = new AnalysisResultCache(100, 2);
+    cache.remember(result("first"), 1_000);
+    cache.remember(result("second"), 1_001);
+    expect(cache.get("first", 1_002)?.jobId).toBe("first");
+    expect(cache.get("missing", 1_003)).toBeNull();
+    cache.remember(result("third"), 1_004);
+    const telemetry = cache.telemetry(1_050);
+
+    expect(telemetry).toMatchObject({
+      scope: "process_local_aggregate",
+      activeEntries: 2,
+      capacity: 2,
+      ttlMs: 100,
+      fillRatio: 1,
+      writes: 3,
+      lookups: 2,
+      hits: 1,
+      misses: 1,
+      hitRate: 0.5,
+      capacityEvictions: 1,
+      expiredEvictions: 0,
+      totalEvictions: 1,
+      lastActivityAt: 1_004,
+    });
+    expect(JSON.stringify(telemetry)).not.toContain("first");
+    expect(JSON.stringify(telemetry)).not.toContain("second");
+    expect(JSON.stringify(telemetry)).not.toContain("third");
+  });
+
+  it("counts expired removals and safely reports zero hit rate before lookups", () => {
+    const cache = new AnalysisResultCache(100, 2);
+    cache.remember(result("expiring"), 2_000);
+    const telemetry = cache.telemetry(2_100);
+    expect(telemetry).toMatchObject({ activeEntries: 0, lookups: 0, hitRate: 0, expiredEvictions: 1, totalEvictions: 1 });
+  });
 });

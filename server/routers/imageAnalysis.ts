@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { analyzeImage, getAnalysisResult } from "../imageAnalysis";
-import { publicProcedure, router } from "../_core/trpc";
+import { analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
+import { adminProcedure, publicProcedure, router } from "../_core/trpc";
 
 const analysisConfig = z.object({
   maxFileSizeBytes: z.number().int().min(256 * 1024).max(32 * 1024 * 1024).default(8 * 1024 * 1024),
@@ -80,6 +80,7 @@ export const imageAnalysisRouter = router({
     const relationships = result.representation.relationships as Array<{ sourceId: string; targetId: string }>;
     return input.entityId ? relationships.filter(item => item.sourceId === input.entityId || item.targetId === input.entityId) : relationships;
   }),
+  cacheTelemetry: adminProcedure.query(() => getAnalysisCacheTelemetry()),
   artifacts: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input }) => {
     const result = getAnalysisResult(input.jobId);
     if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is no longer available in memory." });

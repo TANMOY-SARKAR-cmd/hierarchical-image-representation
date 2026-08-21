@@ -50,6 +50,24 @@ export type AnalysisResult = {
   artifactUrls: AnalysisArtifactUrls;
 };
 
+export type CacheRetentionTelemetry = {
+  scope: "process_local_aggregate";
+  activeEntries: number;
+  capacity: number;
+  ttlMs: number;
+  fillRatio: number;
+  writes: number;
+  lookups: number;
+  hits: number;
+  misses: number;
+  hitRate: number;
+  expiredEvictions: number;
+  capacityEvictions: number;
+  totalEvictions: number;
+  processStartedAt: number;
+  lastActivityAt: number | null;
+};
+
 const supportedMimeTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 const supportedExtensions = new Set(["png", "jpg", "jpeg", "webp"]);
 const DEFAULT_RESULT_TTL_MS = 30 * 60 * 1000;
@@ -62,28 +80,69 @@ function positiveInteger(value: string | undefined, fallback: number) {
 
 export class AnalysisResultCache {
   private readonly results = new Map<string, { result: AnalysisResult; storedAt: number }>();
+  private readonly processStartedAt = Date.now();
+  private writes = 0;
+  private lookups = 0;
+  private hits = 0;
+  private misses = 0;
+  private expiredEvictions = 0;
+  private capacityEvictions = 0;
+  private lastActivityAt: number | null = null;
 
   constructor(private readonly ttlMs: number, private readonly capacity: number) {}
 
   remember(result: AnalysisResult, now = Date.now()) {
     this.purge(now);
+    this.writes += 1;
+    this.lastActivityAt = now;
     this.results.delete(result.jobId);
     this.results.set(result.jobId, { result, storedAt: now });
     while (this.results.size > this.capacity) {
       const oldest = this.results.keys().next().value as string | undefined;
       if (!oldest) break;
       this.results.delete(oldest);
+      this.capacityEvictions += 1;
     }
   }
 
   get(jobId: string, now = Date.now()) {
     this.purge(now);
-    return this.results.get(jobId)?.result ?? null;
+    this.lookups += 1;
+    this.lastActivityAt = now;
+    const result = this.results.get(jobId)?.result ?? null;
+    if (result) this.hits += 1;
+    else this.misses += 1;
+    return result;
+  }
+
+  telemetry(now = Date.now()): CacheRetentionTelemetry {
+    this.purge(now);
+    const activeEntries = this.results.size;
+    return {
+      scope: "process_local_aggregate",
+      activeEntries,
+      capacity: this.capacity,
+      ttlMs: this.ttlMs,
+      fillRatio: this.capacity ? activeEntries / this.capacity : 0,
+      writes: this.writes,
+      lookups: this.lookups,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate: this.lookups ? this.hits / this.lookups : 0,
+      expiredEvictions: this.expiredEvictions,
+      capacityEvictions: this.capacityEvictions,
+      totalEvictions: this.expiredEvictions + this.capacityEvictions,
+      processStartedAt: this.processStartedAt,
+      lastActivityAt: this.lastActivityAt,
+    };
   }
 
   private purge(now: number) {
     for (const [jobId, entry] of Array.from(this.results.entries())) {
-      if (now - entry.storedAt >= this.ttlMs) this.results.delete(jobId);
+      if (now - entry.storedAt >= this.ttlMs) {
+        this.results.delete(jobId);
+        this.expiredEvictions += 1;
+      }
     }
   }
 }
@@ -222,4 +281,8 @@ export async function analyzeImage(input: {
 
 export function getAnalysisResult(jobId: string) {
   return activeResults.get(jobId);
+}
+
+export function getAnalysisCacheTelemetry() {
+  return activeResults.telemetry();
 }

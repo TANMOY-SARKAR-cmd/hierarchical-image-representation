@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
@@ -90,6 +91,7 @@ type Representation = {
   segmentationDiagnostics?: Record<string, { strategy: string; entityCount: number; meanBoundaryEdgeStrength: number; requestedSegments: number }>;
   profiling: Record<string, number>;
 };
+type CacheRetentionTelemetry = { scope: "process_local_aggregate"; activeEntries: number; capacity: number; ttlMs: number; fillRatio: number; writes: number; lookups: number; hits: number; misses: number; hitRate: number; expiredEvictions: number; capacityEvictions: number; totalEvictions: number; processStartedAt: number; lastActivityAt: number | null };
 
 const overlays = [
   { id: "none", label: "Native source" },
@@ -204,6 +206,11 @@ function GraphEdgeFilterPanel({ representation, relationshipTypes, filteredCount
   </section>;
 }
 
+function RuntimeTelemetryPanel({ telemetry, isLoading }: { telemetry: CacheRetentionTelemetry | null | undefined; isLoading: boolean }) {
+  const capacityWarning = Boolean(telemetry && (telemetry.fillRatio >= 0.8 || telemetry.capacityEvictions > 0));
+  return <section className={cn("rounded-xl border bg-slate-900/80 p-4", capacityWarning ? "border-amber-300/35" : "border-cyan-100/10")}><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Activity className={cn("h-4 w-4", capacityWarning ? "text-amber-300" : "text-cyan-300")} /> Runtime telemetry</div>{isLoading ? <p className="text-xs text-slate-500">Loading aggregate cache telemetry…</p> : telemetry ? <div className="space-y-3 text-xs"><div className="grid grid-cols-2 gap-2"><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Active cache</p><p className="mt-1 font-mono text-sm text-cyan-100">{telemetry.activeEntries} / {telemetry.capacity}</p><p className="font-mono text-[9px] text-slate-500">{(telemetry.fillRatio * 100).toFixed(0)}% full</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Hit rate</p><p className="mt-1 font-mono text-sm text-emerald-100">{(telemetry.hitRate * 100).toFixed(1)}%</p><p className="font-mono text-[9px] text-slate-500">{telemetry.hits} hit · {telemetry.misses} miss</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">TTL</p><p className="mt-1 font-mono text-sm text-slate-200">{(telemetry.ttlMs / 60_000).toFixed(0)} min</p><p className="font-mono text-[9px] text-slate-500">{telemetry.writes} writes</p></div><div className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">Evictions</p><p className={cn("mt-1 font-mono text-sm", telemetry.totalEvictions ? "text-amber-100" : "text-slate-200")}>{telemetry.totalEvictions}</p><p className="font-mono text-[9px] text-slate-500">TTL {telemetry.expiredEvictions} · cap {telemetry.capacityEvictions}</p></div></div>{capacityWarning ? <p className="rounded border border-amber-300/20 bg-amber-300/[0.05] p-2 text-[11px] leading-relaxed text-amber-100">Cache capacity pressure is present. Review retention settings or expected concurrent analysis volume.</p> : <p className="text-[11px] leading-relaxed text-slate-500">Aggregate, process-local counters only. No inputs, result IDs, artifact URLs, or image data are retained here.</p>}<p className="font-mono text-[9px] text-slate-600">Last activity {telemetry.lastActivityAt ? new Date(telemetry.lastActivityAt).toLocaleTimeString() : "none"} · resets on server restart</p></div> : <p className="text-xs leading-relaxed text-slate-500">Cache telemetry is unavailable until the server initializes its completed-result cache.</p>}</section>;
+}
+
 function V03InspectionPanels({ representation, selectedEntity }: { representation: Representation | null; selectedEntity: Entity | null }) {
   const correspondence = representation?.scale_correspondence;
   const selectedLink = correspondence?.links.find(link => link.sourceId === selectedEntity?.id || link.targetId === selectedEntity?.id);
@@ -226,6 +233,8 @@ function SegmentationDiagnosticsPanel({ representation }: { representation: Repr
 }
 
 export default function Home() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [file, setFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const sourceUrlRef = useRef<string | null>(null);
@@ -247,6 +256,7 @@ export default function Home() {
   const [minimumConfidence, setMinimumConfidence] = useState(0);
   const [maximumNormalizedDistance, setMaximumNormalizedDistance] = useState(1);
   const processMutation = trpc.imageAnalysis.process.useMutation();
+  const telemetryQuery = trpc.imageAnalysis.cacheTelemetry.useQuery(undefined, { enabled: isAdmin, refetchInterval: isAdmin ? 15_000 : false, refetchOnWindowFocus: false });
 
   const entities = useMemo(() => new Map((representation?.entities ?? []).map(entity => [entity.id, entity])), [representation]);
   const selectedEntity = selectedId ? entities.get(selectedId) ?? null : null;
@@ -446,6 +456,7 @@ export default function Home() {
         </section>
 
         <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+          {isAdmin ? <RuntimeTelemetryPanel telemetry={telemetryQuery.data as CacheRetentionTelemetry | undefined} isLoading={telemetryQuery.isLoading} /> : null}
           <V03InspectionPanels representation={representation} selectedEntity={selectedEntity} />
           <V04ReconstructionPanel representation={representation} selectedEntity={selectedEntity} />
           <SegmentationDiagnosticsPanel representation={representation} />

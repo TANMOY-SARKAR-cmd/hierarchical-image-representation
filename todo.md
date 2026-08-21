@@ -72,3 +72,6 @@
 - [x] Add bounded TTL and capacity eviction to in-memory completed analysis results.
 - [x] Revoke the previous source-preview object URL immediately when the user replaces a file.
 - [x] Add regression coverage, validate, document, checkpoint, synchronize, and deliver all seven QA repairs.
+- [x] Instrument the in-memory completed-result cache with aggregate privacy-preserving retention telemetry.
+- [x] Expose aggregate cache telemetry through an admin-only typed procedure and admin workbench panel.
+- [x] Add cache telemetry regression coverage, operational documentation, validation, checkpointing, synchronization, and delivery.
