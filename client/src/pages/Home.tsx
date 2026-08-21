@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { startLogin } from "@/const";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
@@ -83,7 +84,7 @@ type Representation = {
   experiment?: { id: string; engineVersion: string; configHash: string; algorithm: string };
   feature_schema: { PixelVector: { fields: string[] }; RegionVector?: { fields: string[]; dimension: number }; EntityVector?: { schema: string; categories: string[] } };
   scales: Array<{ scaleFactor: number; entityCount: number; segmentationCharacteristics: { meanComplexity: number; actualSegments: number }; reconstructionError: { psnr: number; ssim: number } }>;
-  reconstruction_metadata: { outputs: Record<string, { entityCount: number; mse: number; psnr: number; ssim: number; model?: string; residual?: { coverage: number; estimatedBytes: number } }>; heuristicRateDistortion?: { basis: string; modes: Record<string, { distortion: number; estimatedBytes: number; normalizedRate: number; score: number }> }; rateDistortion?: Record<string, { distortion: number; estimatedBytes: number; normalizedRate: number; score: number }>; residual?: { coverage: number; estimatedBytes: number; quantizationStep: number } };
+  reconstruction_metadata: { outputs: Record<string, { entityCount: number; mse: number; psnr: number; ssim: number; model?: string; artifactBytes?: number; residual?: { coverage: number; actualEncodedBytes?: number } }>; heuristicRateDistortion?: { basis: string; modes: Record<string, { distortion: number; estimatedBytes: number; normalizedRate: number; score: number }> }; rateDistortion?: Record<string, { distortion: number; estimatedBytes: number; normalizedRate: number; score: number }>; residual?: { coverage: number; actualEncodedBytes?: number; quantizationStep: number; artifactEmitted?: boolean } };
   scale_consistency: { status: string; centroidStability?: number; sizeRatioStability?: number; brightnessStability?: number; colorStability?: number; relationshipStability?: number };
   validity?: { connectivityScore: number; leafCoverage: number; parentAreaConservationError: number; hierarchyCycleCount: number; valid: boolean };
   graph_metadata?: { relationshipDensity: number; candidateSources: string[] };
@@ -91,6 +92,7 @@ type Representation = {
   segmentationDiagnostics?: Record<string, { strategy: string; entityCount: number; meanBoundaryEdgeStrength: number; requestedSegments: number }>;
   profiling: Record<string, number>;
   artifactStorage?: { basis: string; totalBytes: number; files: Record<string, number> };
+  parameterSensitivity?: { schema: string; design: string; interpretation: string; records: Array<{ label: string; entityCountByType: Record<string, number>; relationshipCount: number; quality: { psnr: number; ssim: number; processingTimeMs: number }; artifactStorageBytes: number }> } | null;
 };
 type CacheRetentionTelemetry = { scope: "process_local_aggregate"; activeEntries: number; capacity: number; ttlMs: number; fillRatio: number; writes: number; lookups: number; hits: number; misses: number; hitRate: number; expiredEvictions: number; capacityEvictions: number; totalEvictions: number; processStartedAt: number; lastActivityAt: number | null };
 
@@ -243,7 +245,7 @@ export default function Home() {
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const sourceUrlRef = useRef<string | null>(null);
   const [representation, setRepresentation] = useState<Representation | null>(null);
-  const [artifacts, setArtifacts] = useState<{ representationJson: string; featuresNpz: string; residualsNpz?: string; reconstructedPng: string; svg: string; overlays: Record<string, string>; reconstructions: Record<string, string>; errors: Record<string, string> } | null>(null);
+  const [artifacts, setArtifacts] = useState<{ representationJson: string; featuresNpz: string; residualsNpz?: string; parameterSensitivity?: string; reconstructedPng: string; svg: string; overlays: Record<string, string>; reconstructions: Record<string, string>; errors: Record<string, string> } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedOverlay, setSelectedOverlay] = useState<(typeof overlays)[number]["id"]>("none");
   const [scaleLevels, setScaleLevels] = useState<number[]>([1, 2, 4, 8]);
@@ -254,6 +256,7 @@ export default function Home() {
   const [reconstructionProfile, setReconstructionProfile] = useState<"fast" | "balanced" | "accurate">("balanced");
   const [residualEnabled, setResidualEnabled] = useState(true);
   const [residualBudgetKb, setResidualBudgetKb] = useState(192);
+  const [runParameterSensitivity, setRunParameterSensitivity] = useState(false);
   const [reconstructionLevel, setReconstructionLevel] = useState<string>("residual");
   const [selectedRelationshipTypes, setSelectedRelationshipTypes] = useState<string[]>([]);
   const [adjacentOnly, setAdjacentOnly] = useState(false);
@@ -312,6 +315,11 @@ export default function Home() {
   }
 
   async function runAnalysis() {
+    if (!user) {
+      toast.error("Sign in to run and inspect a private image analysis.");
+      startLogin();
+      return;
+    }
     if (!file) {
       toast.error("Select an image before starting analysis.");
       return;
@@ -330,13 +338,15 @@ export default function Home() {
           maxImagePixels: 786432,
           groupingMethod: segmentationStrategy,
           segmentationStrategy,
-          hierarchyMethod: "graph_agglomerative",
+          hierarchyMethod: "iterative_graph_agglomerative",
+          maxAgglomerationIterations: 2048,
           scaleLevels,
           slicSegments,
           slicCompactness: compactness,
           minimumRegionPixels: 12,
           runScaleConsistency: true,
           maxConsistencyPixels: 786432,
+          crossScaleOverlapThreshold: 0.20,
           graphK: 3,
           mergeThreshold: 0.58,
           edgeBarrierThreshold: 0.70,
@@ -351,6 +361,8 @@ export default function Home() {
           residualBudgetBytes: residualEnabled ? residualBudgetKb * 1024 : 0,
           rateDistortionLambda: 0.0015,
           compareSegmentationBaselines: reconstructionProfile === "accurate",
+          runParameterSensitivity,
+          sensitivityVariantLimit: 5,
         },
       });
       const parsed = result.representation as unknown as Representation;
@@ -428,6 +440,7 @@ export default function Home() {
               <div><Label className="mb-2 block text-xs text-slate-300">Segmentation baseline</Label><div className="grid grid-cols-3 gap-1">{(["slic", "watershed", "felzenszwalb"] as const).map(strategy => <Button key={strategy} type="button" variant="outline" size="sm" onClick={() => setSegmentationStrategy(strategy)} className={cn("h-7 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", segmentationStrategy === strategy && "border-cyan-300/45 bg-cyan-300/10 text-cyan-100")}>{strategy === "felzenszwalb" ? "GRAPH" : strategy.toUpperCase()}</Button>)}</div></div>
               <div><Label className="mb-2 block text-xs text-slate-300">Reconstruction profile</Label><div className="grid grid-cols-3 gap-1">{(["fast", "balanced", "accurate"] as const).map(profile => <Button key={profile} type="button" variant="outline" size="sm" onClick={() => setReconstructionProfile(profile)} className={cn("h-7 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", reconstructionProfile === profile && "border-emerald-300/45 bg-emerald-300/10 text-emerald-100")}>{profile.toUpperCase()}</Button>)}</div></div>
               <div><div className="mb-2 flex items-center justify-between"><Label className="text-xs text-slate-300">Residual detail</Label><Button type="button" variant="outline" size="sm" onClick={() => setResidualEnabled(value => !value)} className={cn("h-6 border-white/10 bg-black/20 px-2 font-mono text-[9px]", residualEnabled ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : "text-slate-500")}>{residualEnabled ? "ON" : "OFF"}</Button></div><div className={cn(!residualEnabled && "opacity-40")}><div className="mb-1 flex justify-between font-mono text-[9px] text-slate-500"><span>Residual budget</span><span>{residualBudgetKb} KB</span></div><Slider value={[residualBudgetKb]} onValueChange={value => setResidualBudgetKb(value[0] ?? 192)} min={0} max={512} step={16} disabled={!residualEnabled} /></div></div>
+              <div><div className="mb-1 flex items-center justify-between"><Label className="text-xs text-slate-300">Sensitivity evidence</Label><Button type="button" variant="outline" size="sm" onClick={() => setRunParameterSensitivity(value => !value)} className={cn("h-6 border-white/10 bg-black/20 px-2 font-mono text-[9px]", runParameterSensitivity ? "border-violet-300/40 bg-violet-300/10 text-violet-100" : "text-slate-500")}>{runParameterSensitivity ? "5 VARIANTS" : "OFF"}</Button></div><p className="text-[10px] leading-relaxed text-slate-500">Runs a bounded server-side parameter sweep for internal dependence evidence, not semantic invariance.</p></div>
               <Button className="h-10 w-full bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={runAnalysis} disabled={!file || processMutation.isPending}>
                 {processMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Building hierarchy…</> : <><Sparkles className="mr-2 h-4 w-4" /> Run analysis</>}
               </Button>
@@ -464,6 +477,7 @@ export default function Home() {
           <V03InspectionPanels representation={representation} selectedEntity={selectedEntity} />
           <V04ReconstructionPanel representation={representation} selectedEntity={selectedEntity} />
           <SegmentationDiagnosticsPanel representation={representation} />
+          {representation?.parameterSensitivity ? <section className="rounded-xl border border-violet-200/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-violet-100"><Activity className="h-4 w-4 text-violet-300" /> Parameter sensitivity</div><p className="text-[11px] leading-relaxed text-slate-500">{representation.parameterSensitivity.interpretation}</p><div className="mt-3 space-y-1.5">{representation.parameterSensitivity.records.map(record => <div key={record.label} className="grid grid-cols-[1fr_auto] gap-x-3 rounded border border-white/8 bg-black/20 px-2.5 py-2 font-mono text-[10px]"><span className="uppercase tracking-wider text-violet-100">{record.label.replace(/_/g, " ")}</span><span className="text-slate-300">{record.relationshipCount} edges</span><span className="text-slate-500">PSNR {record.quality.psnr.toFixed(2)}</span><span className="text-emerald-200">{formatBytes(record.artifactStorageBytes)}</span></div>)}</div>{artifacts?.parameterSensitivity ? <a href={artifacts.parameterSensitivity} className="mt-3 flex items-center gap-2 rounded border border-violet-300/15 bg-violet-300/[0.04] px-2 py-2 font-mono text-[10px] text-violet-100 hover:bg-violet-300/[0.09]"><FileJson2 className="h-3.5 w-3.5" /> Download sensitivity report <Download className="ml-auto h-3 w-3" /></a> : null}</section> : null}
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Network className="h-4 w-4 text-cyan-300" /> Graph hierarchy evidence</div>{representation ? <div className="space-y-3 text-xs"><div className="rounded border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-wider text-slate-500">Experiment</p><p className="mt-1 font-mono text-xs text-cyan-100">{representation.experiment?.engineVersion ?? representation.representation_version ?? "legacy"} · {representation.experiment?.algorithm ?? "deterministic hierarchy"}</p><p className="mt-1 break-all font-mono text-[9px] text-slate-500">{representation.experiment?.configHash ?? "configuration hash unavailable"}</p></div><div className="grid grid-cols-2 gap-2">{[["Connectivity", representation.validity?.connectivityScore ?? 0], ["Leaf coverage", representation.validity?.leafCoverage ?? 0], ["Area error", representation.validity?.parentAreaConservationError ?? 0], ["Graph density", representation.graph_metadata?.relationshipDensity ?? 0]].map(([label, value]) => <div key={String(label)} className="rounded border border-white/8 bg-black/20 p-2"><p className="font-mono text-[9px] uppercase text-slate-500">{label}</p><p className="mt-1 font-mono text-sm text-slate-200">{Number(value).toFixed(3)}</p></div>)}</div><p className={cn("font-mono text-[10px] uppercase tracking-wider", representation.validity?.valid ? "text-emerald-200" : "text-amber-200")}>{representation.validity?.valid ? "Invariant checks passed" : "Review representation invariants"}</p></div> : <p className="text-xs leading-relaxed text-slate-500">v0.5 reports deterministic fixed-depth grouping, graph affinity, connectivity, coverage, and canonical geometry invariants after analysis.</p>}</section>
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Activity className="h-4 w-4 text-cyan-300" /> Quality metrics</div>{representation ? <div className="grid grid-cols-2 gap-2">{[["PSNR", `${representation.metrics.psnr.toFixed(2)} dB`, "cyan"], ["SSIM", representation.metrics.ssim.toFixed(4), "emerald"], ["MSE", representation.metrics.mse.toFixed(2), "amber"], ["Overhead", `${representation.metrics.representationOverhead.toFixed(1)}×`, "violet"], ["Runtime", `${representation.metrics.processingTimeMs.toFixed(0)} ms`, "cyan"], ["Artifact", formatBytes(representation.metrics.representationBytes), "slate"]].map(([label, value, tone]) => <div key={label} className="rounded-md border border-white/8 bg-black/20 p-2.5"><p className="font-mono text-[9px] uppercase tracking-[0.13em] text-slate-500">{label}</p><p className={cn("mt-1 font-mono text-sm font-semibold", tone === "cyan" ? "text-cyan-200" : tone === "emerald" ? "text-emerald-200" : tone === "amber" ? "text-amber-200" : tone === "violet" ? "text-violet-200" : "text-slate-200")}>{value}</p></div>)}</div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Fidelity and artifact metrics appear after region decoding.</p>}</section>
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Boxes className="h-4 w-4 text-cyan-300" /> Entity inspector</div>{selectedEntity ? <div className="space-y-4 text-xs"><div><p className="font-mono text-[10px] uppercase tracking-[0.15em] text-cyan-300">{selectedEntity.type.replace("_", " ")} · L{selectedEntity.level}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-500">{selectedEntity.id}</p></div><div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md border border-white/8 bg-black/20 p-3"><span className="text-slate-500">Bounding box</span><span className="font-mono text-right text-slate-200">[{selectedEntity.geometry.boundingBox.join(", ")}]</span><span className="text-slate-500">Centroid</span><span className="font-mono text-right text-slate-200">({selectedEntity.geometry.centroid.map(value => value.toFixed(1)).join(", ")})</span><span className="text-slate-500">Area</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.area} px</span><span className="text-slate-500">Perimeter</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.perimeter.toFixed(1)}</span><span className="text-slate-500">Orientation</span><span className="font-mono text-right text-slate-200">{selectedEntity.geometry.orientation.toFixed(1)}°</span><span className="text-slate-500">Mean RGB</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.meanRGB.map(value => value.toFixed(0)).join(", ")}</span><span className="text-slate-500">Brightness</span><span className="font-mono text-right text-slate-200">{selectedEntity.appearance.brightness.toFixed(3)}</span><span className="text-slate-500">Members</span><span className="font-mono text-right text-slate-200">{selectedEntity.statistics.memberPixelCount}</span></div><div><p className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-slate-500">Relationships · {entityRelationships.length}</p><div className="max-h-40 space-y-1 overflow-auto pr-1">{entityRelationships.slice(0, 12).map(relationship => <div key={`${relationship.sourceId}-${relationship.targetId}`} className="rounded border border-white/7 bg-black/15 p-2 font-mono text-[10px] text-slate-400"><span className={relationship.adjacent ? "text-emerald-300" : "text-slate-500"}>{relationship.primaryType.toUpperCase()}</span> · d {relationship.normalizedDistance.toFixed(3)} · Δc {relationship.colorDistance.toFixed(1)} · θ {relationship.angle.toFixed(1)}°</div>) || <p className="text-slate-600">No sparse relationships for this entity.</p>}</div></div></div> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Choose an entity in the hierarchy to inspect its exact geometry, appearance, vectors, and graph relationships.</p>}</section>

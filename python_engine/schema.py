@@ -7,14 +7,15 @@ import json
 from copy import deepcopy
 from typing import Any, Dict
 
-SCHEMA_VERSION = "0.5.0"
-SUPPORTED_VERSIONS = ("0.2.0", "0.3.0", "0.4.0", "0.5.0")
+SCHEMA_VERSION = "0.6.0"
+SUPPORTED_VERSIONS = ("0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.6.0")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "maxImagePixels": 786_432,
     "groupingMethod": "slic",
     "segmentationStrategy": "slic",
-    "hierarchyMethod": "graph_agglomerative",
+    "hierarchyMethod": "iterative_graph_agglomerative",
+    "maxAgglomerationIterations": 2048,
     "scaleLevels": [1, 2, 4, 8],
     "slicSegments": 72,
     "slicCompactness": 10.0,
@@ -29,6 +30,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "shapeWeights": {"compactness": 0.25, "orientation": 0.20, "hu": 0.55},
     "runScaleConsistency": True,
     "maxConsistencyPixels": 786_432,
+    "crossScaleOverlapThreshold": 0.20,
+    "runParameterSensitivity": False,
+    "sensitivityVariantLimit": 5,
     "reconstructionProfile": "balanced",
     "appearanceModelCandidates": ["constant", "affine", "quadratic"],
     "modelPenalty": 0.00045,
@@ -74,4 +78,4 @@ def read_compatible_representation(payload: Dict[str, Any]) -> Dict[str, Any]:
             if entity.get("crossScaleParentId") and not entity.get("crossScaleMatchId"):
                 entity["crossScaleMatchId"] = entity["crossScaleParentId"]
         return {"version": version, "entities": entities, "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.4-with-correspondence-alias"}
-    return {"version": version, "entities": entities, "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.5"}
+    return {"version": version, "entities": entities, "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.5" if version == "0.5.0" else "native-v0.6"}

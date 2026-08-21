@@ -10,13 +10,15 @@ export type AnalysisConfig = {
   maxImagePixels: number;
   groupingMethod: "slic" | "watershed" | "felzenszwalb";
   segmentationStrategy: "slic" | "watershed" | "felzenszwalb";
-  hierarchyMethod: "graph_agglomerative";
+  hierarchyMethod: "iterative_graph_agglomerative";
+  maxAgglomerationIterations: number;
   scaleLevels: number[];
   slicSegments: number;
   slicCompactness: number;
   minimumRegionPixels: number;
   runScaleConsistency: boolean;
   maxConsistencyPixels: number;
+  crossScaleOverlapThreshold: number;
   graphK: number;
   mergeThreshold: number;
   edgeBarrierThreshold: number;
@@ -31,12 +33,15 @@ export type AnalysisConfig = {
   residualBudgetBytes: number;
   rateDistortionLambda: number;
   compareSegmentationBaselines: boolean;
+  runParameterSensitivity: boolean;
+  sensitivityVariantLimit: number;
 };
 
 export type AnalysisArtifactUrls = {
   representationJson: string;
   featuresNpz: string;
-  residualsNpz: string;
+  residualsNpz?: string;
+  parameterSensitivity?: string;
   reconstructedPng: string;
   svg: string;
   overlays: Record<string, string>;
@@ -46,6 +51,7 @@ export type AnalysisArtifactUrls = {
 
 export type AnalysisResult = {
   jobId: string;
+  ownerId: string;
   representation: Record<string, unknown>;
   artifactUrls: AnalysisArtifactUrls;
 };
@@ -215,7 +221,7 @@ export function validateImageSignature(data: Buffer, mimeType: string, extension
 }
 
 function runPython(inputPath: string, outputPath: string, config: AnalysisConfig) {
-  const scriptPath = path.join(process.cwd(), "python_engine", "representation_engine_v3.py");
+  const scriptPath = path.join(process.cwd(), "python_engine", "representation_engine.py");
   const python = process.env.PYTHON_EXECUTABLE ?? "python3";
   return new Promise<void>((resolve, reject) => {
     const processHandle = spawn(python, [scriptPath, "--input", inputPath, "--output", outputPath, "--config", JSON.stringify(config)], {
@@ -267,7 +273,7 @@ export async function analyzeImage(input: {
   mimeType: string;
   dataBase64: string;
   config: AnalysisConfig;
-}, admissionKey = "direct"): Promise<AnalysisResult> {
+}, ownerId = "direct", admissionKey = `direct:${ownerId}`): Promise<AnalysisResult> {
   if (!supportedMimeTypes.has(input.mimeType)) {
     throw new Error("Supported image formats are PNG, JPEG, and WebP.");
   }
@@ -317,17 +323,20 @@ export async function analyzeImage(input: {
       perRegionError: await uploadArtifact(jobId, outputPath, "errors/per-region-error.png", "image/png"),
       residualEnergy: await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png"),
     };
+    const residualArtifact = (representation.artifacts as { residuals?: string | null } | undefined)?.residuals;
+    const sensitivityArtifact = (representation.artifacts as { parameterSensitivity?: string | null } | undefined)?.parameterSensitivity;
     const artifactUrls: AnalysisArtifactUrls = {
       representationJson: await uploadArtifact(jobId, outputPath, "representation.json", "application/json"),
       featuresNpz: await uploadArtifact(jobId, outputPath, "features.npz", "application/octet-stream"),
-      residualsNpz: await uploadArtifact(jobId, outputPath, "residuals.npz", "application/octet-stream"),
+      ...(residualArtifact ? { residualsNpz: await uploadArtifact(jobId, outputPath, residualArtifact, "application/octet-stream") } : {}),
+      ...(sensitivityArtifact ? { parameterSensitivity: await uploadArtifact(jobId, outputPath, sensitivityArtifact, "application/json") } : {}),
       reconstructedPng: await uploadArtifact(jobId, outputPath, "reconstructed.png", "image/png"),
       svg: await uploadArtifact(jobId, outputPath, "reconstruction.svg", "image/svg+xml"),
       overlays: overlayUrls,
       reconstructions,
       errors,
     };
-      const result = { jobId, representation, artifactUrls };
+      const result = { jobId, ownerId, representation, artifactUrls };
       activeResults.remember(result);
       return result;
     } finally {

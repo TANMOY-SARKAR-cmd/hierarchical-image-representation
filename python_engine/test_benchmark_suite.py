@@ -11,7 +11,7 @@ class BenchmarkSuiteTest(unittest.TestCase):
             output = Path(directory) / "benchmark"
             subprocess.run(["python3", "python_engine/benchmark_suite.py", "--output", str(output)], check=True, cwd=Path(__file__).resolve().parents[1])
             report = json.loads((output / "benchmark-report.json").read_text())
-            self.assertEqual(report["benchmarkVersion"], "0.5.0")
+            self.assertEqual(report["benchmarkVersion"], "0.6.0")
             self.assertTrue(report["researchPrototype"])
             self.assertEqual(len(report["records"]), 7)
             first = report["records"][0]
@@ -20,7 +20,9 @@ class BenchmarkSuiteTest(unittest.TestCase):
             self.assertTrue({"constant", "parametric", "residual"}.issubset(first["reconstructionModes"]))
             self.assertGreaterEqual(first["reconstructionModes"]["residual"]["psnr"], first["reconstructionModes"]["constant"]["psnr"])
             self.assertEqual(set(first["segmentationDiagnostics"]), {"slic", "watershed", "felzenszwalb"})
-            self.assertGreater(first["residual"]["estimatedBytes"], 0)
+            self.assertTrue(first["residual"]["artifactEmitted"])
+            self.assertGreater(first["residual"]["actualEncodedBytes"], 0)
+            self.assertLessEqual(first["residual"]["actualEncodedBytes"], first["residual"]["budgetBytes"])
             self.assertEqual(first["heuristicRateDistortion"]["basis"], "parameter_payload_estimate_not_serialized_storage")
             self.assertEqual(first["artifactStorage"]["basis"], "actual_emitted_file_bytes")
             self.assertTrue(first["codecComparisons"]["PNG"]["available"])

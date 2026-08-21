@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const processMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
 const telemetryQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const authState = vi.hoisted(() => ({ user: null as { role: string } | null }));
+const startLogin = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -17,6 +18,7 @@ vi.mock("@/lib/trpc", () => ({
 }));
 
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => authState }));
+vi.mock("@/const", () => ({ startLogin }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -43,6 +45,7 @@ describe("Hierarchy workbench UI", () => {
 
   beforeEach(() => {
     processMutation.mutateAsync.mockReset();
+    startLogin.mockReset();
     telemetryQuery.data = undefined;
     telemetryQuery.isLoading = false;
     authState.user = null;
@@ -102,6 +105,7 @@ describe("Hierarchy workbench UI", () => {
   });
 
   it("applies interactive edge controls and resets the filtered graph", async () => {
+    authState.user = { role: "user" };
     processMutation.mutateAsync.mockResolvedValue(completedResult);
     const view = render(<Home />);
     fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
@@ -122,7 +126,7 @@ describe("Hierarchy workbench UI", () => {
     fireEvent.click(view.getByRole("button", { name: "Relationship graph" }));
     expect(view.getByLabelText("1 filtered graph edges")).toBeInTheDocument();
 
-    fireEvent.click(view.getByRole("button", { name: "OFF" }));
+    fireEvent.click(view.getByText("Adjacent only").parentElement?.querySelector("button") as HTMLButtonElement);
     fireEvent.change(view.getByRole("spinbutton", { name: "Minimum confidence" }), { target: { value: "1" } });
     await waitFor(() => expect(view.getByText(/No graph edges match/i)).toBeInTheDocument());
     fireEvent.change(view.getByRole("spinbutton", { name: "Maximum normalized distance" }), { target: { value: "0.05" } });

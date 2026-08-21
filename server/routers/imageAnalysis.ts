@@ -1,20 +1,22 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
-import { adminProcedure, publicProcedure, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 
 const analysisConfig = z.object({
   maxFileSizeBytes: z.number().int().min(256 * 1024).max(32 * 1024 * 1024).default(8 * 1024 * 1024),
   maxImagePixels: z.number().int().min(64 * 64).max(2_000_000).default(Number(process.env.MAX_IMAGE_PIXELS ?? 786_432)),
   groupingMethod: z.enum(["slic", "watershed", "felzenszwalb"]).default("slic"),
   segmentationStrategy: z.enum(["slic", "watershed", "felzenszwalb"]).default("slic"),
-  hierarchyMethod: z.literal("graph_agglomerative").default("graph_agglomerative"),
+  hierarchyMethod: z.literal("iterative_graph_agglomerative").default("iterative_graph_agglomerative"),
+  maxAgglomerationIterations: z.number().int().min(1).max(20_000).default(2048),
   scaleLevels: z.array(z.number().int().min(1).max(8)).min(1).max(4).default([1, 2, 4, 8]),
   slicSegments: z.number().int().min(8).max(180).default(72),
   slicCompactness: z.number().min(0.1).max(50).default(10),
   minimumRegionPixels: z.number().int().min(1).max(500).default(12),
   runScaleConsistency: z.boolean().default(true),
   maxConsistencyPixels: z.number().int().min(64 * 64).max(1_500_000).default(786_432),
+  crossScaleOverlapThreshold: z.number().min(0.01).max(1).default(0.20),
   graphK: z.number().int().min(1).max(12).default(3),
   mergeThreshold: z.number().min(0.1).max(0.95).default(0.58),
   edgeBarrierThreshold: z.number().min(0).max(1).default(0.70),
@@ -29,9 +31,11 @@ const analysisConfig = z.object({
   residualBudgetBytes: z.number().int().min(0).max(2_000_000).default(196_608),
   rateDistortionLambda: z.number().min(0).max(1).default(0.0015),
   compareSegmentationBaselines: z.boolean().default(false),
+  runParameterSensitivity: z.boolean().default(false),
+  sensitivityVariantLimit: z.number().int().min(1).max(5).default(5),
 });
 
-function admissionKey(ctx: { user: { id: number } | null; req?: { headers?: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } } }) {
+function admissionKey(ctx: { user: { id: string | number } | null; req?: { headers?: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } } }) {
   if (ctx.user) return `user:${ctx.user.id}`;
   const forwarded = ctx.req?.headers?.["x-forwarded-for"];
   const address = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0]?.trim() ?? ctx.req?.ip ?? ctx.req?.socket?.remoteAddress ?? "anonymous";
@@ -39,7 +43,7 @@ function admissionKey(ctx: { user: { id: number } | null; req?: { headers?: Reco
 }
 
 export const imageAnalysisRouter = router({
-  process: publicProcedure
+  process: protectedProcedure
     .input(
       z.object({
         fileName: z.string().min(1).max(160),
@@ -50,7 +54,7 @@ export const imageAnalysisRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        return await analyzeImage(input, admissionKey(ctx));
+        return await analyzeImage(input, String(ctx.user.id), admissionKey(ctx));
       } catch (error) {
         if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
         throw new TRPCError({
@@ -59,22 +63,23 @@ export const imageAnalysisRouter = router({
         });
       }
     }),
-  result: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input }) => {
+  result: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input, ctx }) => {
     const result = getAnalysisResult(input.jobId);
-    if (!result) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is no longer available in memory." });
+    if (!result || result.ownerId !== String(ctx.user.id)) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
     }
     return result;
   }),
-  entity: publicProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1) })).query(({ input }) => {
+  entity: protectedProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1) })).query(({ input, ctx }) => {
     const result = getAnalysisResult(input.jobId);
+    if (!result || result.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "The requested entity is not available." });
     const entity = (result?.representation.entities as Array<{ id: string }> | undefined)?.find(item => item.id === input.entityId);
     if (!entity) throw new TRPCError({ code: "NOT_FOUND", message: "The requested entity is not available." });
     return entity;
   }),
-  hierarchy: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input }) => {
+  hierarchy: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input, ctx }) => {
     const result = getAnalysisResult(input.jobId);
-    if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is no longer available in memory." });
+    if (!result || result.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
     return {
       hierarchy: result.representation.hierarchy,
       pixelLevel: result.representation.pixelLevel,
@@ -82,16 +87,16 @@ export const imageAnalysisRouter = router({
       scaleLevels: result.representation.scaleLevels,
     };
   }),
-  relationships: publicProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1).optional() })).query(({ input }) => {
+  relationships: protectedProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1).optional() })).query(({ input, ctx }) => {
     const result = getAnalysisResult(input.jobId);
-    if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is no longer available in memory." });
+    if (!result || result.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
     const relationships = result.representation.relationships as Array<{ sourceId: string; targetId: string }>;
     return input.entityId ? relationships.filter(item => item.sourceId === input.entityId || item.targetId === input.entityId) : relationships;
   }),
   cacheTelemetry: adminProcedure.query(() => getAnalysisCacheTelemetry()),
-  artifacts: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input }) => {
+  artifacts: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input, ctx }) => {
     const result = getAnalysisResult(input.jobId);
-    if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is no longer available in memory." });
+    if (!result || result.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
     return result.artifactUrls;
   }),
 });

@@ -1,100 +1,82 @@
 # Relational Entity Representation Schema
 
-## Version 0.5.0
+## Version 0.6.0
 
-Version **0.5.0** corrects several semantic and measurement issues in the deterministic image representation workbench. It retains the non-semantic pixel-to-entity architecture while introducing a candidate-specific boundary reconstruction residual, explicit correspondence naming, separated heuristic and actual storage accounting, and bounded public submission admission. It remains a **research prototype**: its metrics are deterministic internal diagnostics, not general scientific validation or compression-codec results.
+Version **0.6.0** is a deterministic, non-semantic image-structure research workbench. It transforms an authenticated user’s submitted raster into pixel features, segmented micro-regions, a sparse relational graph, an iteratively formed containment hierarchy, multi-scale correspondence records, local Lab reconstruction models, and an optional bounded sparse residual. It is **not** a general image codec, semantic vision system, identity system, or scientifically validated universal representation.
 
-> The system encodes measured image structure only. It does not use semantic classification, identity recognition, generative synthesis, or client-side image processing.
+> The engine measures colour, texture, geometry, edges, gradients, masks, and local reconstruction error. It performs no classification, face recognition, semantic inference, training, or generation.
 
 | Layer | Primary record | Storage rule |
 |---|---|---|
-| Image | Dimensions, experiment metadata, resolved configuration, prototype status | JSON |
-| Pixel feature field | Dense `H × W × F` tensor and `pixelToMicroregion` labels | `features.npz` |
-| Micro-region | Canonical geometry, sufficient statistics, selected local Lab model | JSON plus label field |
-| Higher entity | Child IDs, union geometry, derived statistics | JSON; no copied member-pixel lists |
-| Relationship graph | Sparse same-level, containment, and cross-resolution correspondence records | JSON |
-| Quantized residual field | Bounded deterministic detail after adaptive reconstruction | `residuals.npz` |
+| Image | Dimensions, resolved configuration, experiment metadata | `representation.json` |
+| Pixel features | Dense `H × W × F` tensor and micro-region labels | `features.npz` |
+| Micro-region | Canonical mask geometry, sufficient statistics, local Lab model | JSON plus label field |
+| Higher entity | Child IDs, union geometry, lineage and merge evidence | JSON; no duplicated pixel lists |
+| Relationship graph | Sparse same-level, containment, match, and overlap records | JSON |
+| Sparse residual | Quantized flat pixel indices, RGB values, shape, and step | Optional `residuals.npz` |
+| Sensitivity evidence | Bounded one-factor-family parameter report | Optional `sensitivity/report.json` |
 
-## Entity, Grouping, and Correspondence Semantics
+## Iterative Hierarchy and Explicit Root Semantics
 
-`PixelVector@0.5` contains deterministic geometry, RGB/HSV/Lab appearance, gradients, edge strength, local variance, entropy, and complexity. `EntityVector@0.5` records canonical mask-union geometry, sufficient-statistics appearance, local structure, shape descriptors, and a flattened numerical vector.
+The active `iterative_graph_agglomerative` method builds each fixed taxonomy transition—micro-region to region, region to composite, and composite to entity—through deterministic active-set agglomeration. It repeatedly ranks eligible adjacent graph edges by merge affinity with stable ID tie-breaking, accepts the best pair that satisfies threshold, connectedness, maximum-area, and edge-barrier constraints, recomputes geometry/statistics and candidates for the new active node, and continues until no eligible merge remains or `maxAgglomerationIterations` is reached.
 
-The hierarchy is a **fixed-depth greedy pairwise connectivity-constrained graph grouping**, not convergence-based recursive agglomerative clustering. At each of the three fixed transitions—micro-region to region, region to composite, and composite to entity—the engine considers eligible adjacent pairs once, accepts deterministic affinity-ranked merges that satisfy area and boundary-barrier rules, and carries unmatched children forward. Parent-child relationships remain true containment relationships.
+Every final parent records the original lower-level child IDs and a `lineage.mergeSequence` containing iteration number, accepted affinity, touching-boundary evidence, and threshold. The root remains an explicit full-image anchor with `rootSemantics: explicit_full_image_anchor_not_inferred_agglomeration`; it is not presented as an inferred final agglomerative merge.
 
-Cross-resolution Hungarian assignments are correspondences, not containment. New v0.5 entities use `crossScaleMatchId` for a selected coarse-resolution correspondence target. The `cross_scale_correspondence` relationship retains the complete match evidence.
+| Field | Meaning |
+|---|---|
+| `hierarchy.grouping` | Fixed-depth iterative connectivity-constrained graph agglomeration |
+| `lineage.operation` | `iterative_merge`, `carry`, or `root_anchor` |
+| `lineage.mergeSequence` | Ordered accepted working merges that created the parent |
+| `edgeBarrierThreshold` | Rejects a candidate union across a stronger measured touching edge |
+| `maxAgglomerationIterations` | Deterministic safety ceiling for one hierarchy stage |
+
+## Cross-Scale Best Matches and Many-to-One Overlaps
+
+Hungarian assignment remains a **one-to-one best-match diagnostic**. It is stored in `scale_correspondence.bestMatches` and retains the historical compatible `links` alias. `crossScaleMatchId` names only that selected best match; it is not a hierarchy parent field.
+
+Version 0.6 additionally emits every fine-to-coarse overlap whose fine-mask coverage meets `crossScaleOverlapThreshold`. These records are stored in `scale_correspondence.overlapLinks` with `primaryType: cross_scale_overlap` and `semantics: fine_to_coarse_overlap_not_hierarchy_containment`. They provide a deterministic many-to-one structural view without asserting actual inter-resolution containment.
 
 | Relationship form | Meaning |
 |---|---|
-| `parentId` and containment edge | True hierarchy containment at one resolution |
-| `crossScaleMatchId` | Selected cross-resolution correspondence target |
-| `cross_scale_correspondence` | Hungarian match record with IoU, centroid, appearance, area, cost, and confidence |
+| `parentId` and `contains` | True same-resolution hierarchy containment |
+| `crossScaleMatchId` / `cross_scale_correspondence` | One-to-one Hungarian best-match evidence |
+| `cross_scale_overlap` | Fine-to-coarse mask overlap; never a parent-child assertion |
 
-## Adaptive Reconstruction and Boundary Residual
+## Adaptive Reconstruction and Real Residual Budgets
 
-Each micro-region evaluates configured constant, affine, and quadratic CIE Lab candidates. The model-selection objective is deterministic and combines whole-region Lab MSE, parameter count, and an **edge-weighted interior boundary-band residual**. The boundary statistic is computed separately for every candidate using only region pixels adjacent to the exterior and is therefore capable of changing the winning model.
+Each micro-region evaluates constant, affine, and quadratic Lab models using whole-region Lab MSE, parameter penalty, and a candidate-specific edge-weighted interior boundary-band residual. The compatible `boundaryLeakagePenalty` setting applies to this candidate-specific `boundaryResidual`; it does not measure average interior edge density or predict exterior pixels.
 
-`boundaryLeakagePenalty` remains the compatible configuration key, but in v0.5 its documented meaning is the penalty applied to candidate-specific `boundaryResidual`. It is not a measure of average interior edge density and it does not claim to predict outside the region mask.
-
-| Output mode | Artifact | Meaning |
-|---|---|---|
-| `constant` | `reconstructions/constant.png` | Constant colour per micro-region baseline |
-| `parametric` | `reconstructions/parametric.png` | Selected constant/affine/quadratic Lab models |
-| `residual` | `reconstructions/residual.png` | Parametric output plus bounded quantized residual |
-| `full` | `reconstructions/full.png` | Progressive reconstruction compatibility output |
-
-## Heuristic Scores and Actual Artifact Storage
-
-The former `rateDistortion` field is replaced by `reconstruction_metadata.heuristicRateDistortion`. Its score remains useful for deterministic internal mode comparison, but it is explicitly based on estimated parameter or residual payload size rather than serialized representation storage.
-
-`artifactStorage` is a separate v0.5 record with the measured byte count of every emitted file and the total emitted run bundle. It records actual `representation.json`, NPZ, PNG, SVG, overlay, and error-map file sizes after generation. It is descriptive run accounting; it does not feed model selection and is not a codec bit-rate claim.
+Residual mode ranks non-zero quantized RGB residual pixels deterministically by RGB L1 magnitude. It encodes sorted flat indices, signed quantized values, shape, and quantization step in a compressed NPZ payload, measures the resulting bytes, and retains the largest payload that fits `residualBudgetBytes`. If no valid encoded payload fits the requested budget, the run emits no `residuals.npz` file and reports `noPayloadFitsBudget` instead of pretending a synthetic capacity was met.
 
 | Record | Basis | Appropriate use |
 |---|---|---|
-| `heuristicRateDistortion` | Parameter-payload and residual estimate per pixel | Deterministic model diagnostic |
-| `artifactStorage` | Actual emitted file bytes | Reproducibility and storage inspection |
+| `heuristicRateDistortion` | Parameter-payload estimate for model selection | Deterministic internal model comparison only |
+| `residual.actualEncodedBytes` | Measured compressed sparse residual artifact bytes | Real residual-budget compliance |
+| `outputs.*.artifactBytes` | Measured PNG bytes per reconstruction output | Artifact inspection |
+| `artifactStorage` | Measured bytes for every emitted run file | Reproducibility and bundle accounting |
 
-## Segmentation and Cross-Scale Limits
+`heuristicRateDistortion` and `artifactStorage` are deliberately separate. Neither alone establishes a complete codec bit rate, perceptual rate-distortion curve, or compression claim.
 
-The active primary segmentation strategy is `slic`, `watershed`, or `felzenszwalb`; unsupported direct-engine names are rejected. Multi-scale entities and reconstruction artifacts are created for every configured scale. Cross-scale correspondence is optional: `scale_consistency.status` is `completed`, `disabled`, or `skipped_pixel_limit`, while normal per-scale output remains available in all cases.
+## Authenticated Ownership, Admission, and Retention
 
-| Configuration field | Default | Effect |
-|---|---:|---|
-| `runScaleConsistency` | `true` | Enables the optional Hungarian correspondence experiment |
-| `maxConsistencyPixels` | `786432` | Skips correspondence above this native-pixel ceiling |
-| `edgeBarrierThreshold` | `0.70` | Prevents merging across a measured strong touching boundary |
-| `appearanceModelCandidates` | constant, affine, quadratic | Eligible local-Lab model families |
-| `modelPenalty` | `0.00045` | Penalty for model parameters |
-| `boundaryLeakagePenalty` | `0.00015` | Penalty for candidate-specific boundary residual |
-| `residualBudgetBytes` | `196608` | Requested residual-detail ceiling |
-| `rateDistortionLambda` | `0.0015` | Weight for the explicitly heuristic model score |
+Creating an analysis and reading its result, entity, hierarchy, relationships, or artifact manifest now require authentication. Every in-memory result is scoped to the submitting identity. A request for another user’s result returns `NOT_FOUND` rather than exposing whether it exists. The client starts sign-in from a user action before it submits a private analysis.
 
-## Public Submission Admission and Result Retention
+Upload admission validates canonical base64 plus consistent filename extension, MIME type, and binary signature for PNG, JPEG, or WebP. It enforces byte and pixel ceilings, temporary-workspace cleanup, a 120-second child-process limit, fixed-window per-user submission limits, and a process-local concurrent-job cap. Completed result metadata remains process-local under configurable TTL and capacity eviction; aggregate-only cache telemetry is administrator-only.
 
-The public processing route validates accepted PNG, JPEG, and WebP submissions before temporary-file creation. The request must contain canonical base64, and its declared MIME type, filename extension, and binary magic signature must agree. The server continues to enforce configured byte and pixel ceilings, temporary-workspace cleanup, and a child-process timeout.
+## Parameter-Sensitivity Evidence
 
-Process-local admission control adds a fixed submission window, a per-client limit, and a global in-flight analysis cap. `ANALYSIS_SUBMISSION_WINDOW_MS`, `ANALYSIS_SUBMISSION_MAX_PER_WINDOW`, and `ANALYSIS_MAX_INFLIGHT` accept positive-integer overrides. Rejected capacity or quota requests return `TOO_MANY_REQUESTS`. These controls are instance-local prototype protections; production deployments should also use edge-level limits, authenticated tenancy, parser-security review, sandboxing, malware scanning where appropriate, and storage-policy review.
+When `runParameterSensitivity` is enabled, the server runs a bounded deterministic set of one-factor-family variations: coarser/finer SLIC partitioning, conservative/permissive merge settings, and native-scale-only analysis. `sensitivityVariantLimit` is capped at five. The resulting `ParameterSensitivity@0.6` report records changed settings, entity counts, relationship counts, PSNR/SSIM/runtime, emitted bundle bytes, and configuration hashes.
 
-Completed interactive result metadata remains process-local for a 30-minute TTL and 100-result oldest-first capacity by default. `ANALYSIS_RESULT_TTL_MS` and `ANALYSIS_RESULT_CACHE_CAPACITY` can override these values. Immutable exported artifacts remain in storage when in-memory result metadata is expired or evicted.
+> Sensitivity output is evidence of parameter dependence for this deterministic prototype. It is not evidence of object-level semantic invariance, external scientific validation, or predictor generalization.
 
-## Cache-Retention Telemetry
+## Migration and Active Paths
 
-The administrator-only `imageAnalysis.cacheTelemetry` query reports aggregate, process-local cache behavior. The workbench requests it every 15 seconds only for authenticated administrators and shows fill pressure, lifetime hits and misses, TTL/capacity evictions, and last activity. It excludes job IDs, file names, image data, artifact URLs, user data, and event history.
+The compatibility reader accepts exports from v0.2.0 through v0.6.0. New analyses emit v0.6.0. Historical v0.4 `crossScaleParentId` fields are exposed only as derived `crossScaleMatchId` compatibility aliases without mutating the original export.
 
-| Field group | Interpretation |
-|---|---|
-| `activeEntries`, `capacity`, `fillRatio` | Retained-result pressure; the workbench warns at 80% fill or capacity eviction |
-| `writes`, `lookups`, `hits`, `misses`, `hitRate` | Aggregate effectiveness since process start |
-| `expiredEvictions`, `capacityEvictions`, `totalEvictions` | TTL, oldest-first capacity, and combined removals |
-| `ttlMs`, `processStartedAt`, `lastActivityAt` | Process-local retention policy and lifecycle context |
+The active CLI is `python_engine/representation_engine.py`, invoked by the server bridge. `representation_engine_v3.py` is a documented compatibility shim. Earlier engines remain in `python_engine/legacy/` for historical reference and must not be treated as active pipeline implementations.
 
-## Migration and Compatibility
+## Privacy and Research Limits
 
-The active compatibility reader accepts v0.2.0 through v0.5.0 exports. New analyses emit v0.5.0. Historical v0.4 entities may contain `crossScaleParentId`; the compatibility reader exposes a derived `crossScaleMatchId` alias without mutating the original payload. Historical `boundaryLeakage` and `rateDistortion` records remain readable as legacy data, while new v0.5 analyses write `boundaryResidual`, `heuristicRateDistortion`, and `artifactStorage`.
+User-provided acceptance fixtures remain private, uncommitted, and excluded from semantic inference, training, classification, identity processing, and generated content. The engine operates only on the pixels provided to the authenticated run.
 
-Inactive pre-v0.3 engine implementations are retained under `python_engine/legacy/` solely as historical reference. The active implementation is `python_engine/representation_engine_v3.py` with `python_engine/engine.py` and the active `test_representation_engine_v3.py` regression suite.
-
-## Privacy, Limits, and Research Status
-
-User-supplied visual acceptance fixtures remain private, uncommitted, and unused for semantic inference, training, classification, identity processing, or generated content. The engine operates only on a submitted run’s pixels.
-
-The workbench is not scientifically validated as a general image representation, compression method, or learned visual model. Its deterministic tests, reconstruction metrics, segmentation diagnostics, and benchmark records are internal engineering evidence. Learned segmentation, neural reconstruction, object recognition, face recognition, identity-based generation, stochastic reconstruction, and general scientific performance claims remain out of scope.
+The workbench’s tests, benchmarks, sensitivity reports, reconstruction metrics, and segmentation diagnostics are internal engineering evidence. Learned segmentation, neural reconstruction, object recognition, face recognition, stochastic reconstruction, universal representation claims, codec-superiority claims, and external scientific validation are intentionally out of scope.

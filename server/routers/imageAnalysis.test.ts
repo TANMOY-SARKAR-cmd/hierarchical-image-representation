@@ -19,13 +19,15 @@ const baseInput = {
     maxImagePixels: 786432,
     groupingMethod: "slic" as const,
     segmentationStrategy: "slic" as const,
-    hierarchyMethod: "graph_agglomerative" as const,
+    hierarchyMethod: "iterative_graph_agglomerative" as const,
+    maxAgglomerationIterations: 2048,
     scaleLevels: [1, 2, 4, 8],
     slicSegments: 72,
     slicCompactness: 10,
     minimumRegionPixels: 12,
     runScaleConsistency: true,
     maxConsistencyPixels: 786432,
+    crossScaleOverlapThreshold: 0.20,
     graphK: 3,
     mergeThreshold: 0.58,
     edgeBarrierThreshold: 0.70,
@@ -40,72 +42,62 @@ const baseInput = {
     residualBudgetBytes: 196608,
     rateDistortionLambda: 0.0015,
     compareSegmentationBaselines: false,
+    runParameterSensitivity: false,
+    sensitivityVariantLimit: 5,
   },
 };
+
+const userContext = { user: { id: 1, role: "user" } } as never;
 
 describe("imageAnalysis router", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("invokes the child-process bridge through a typed valid process request", async () => {
-    vi.mocked(analyzeImage).mockResolvedValue({
-      jobId: "job-123",
-      representation: { version: "1.0.0" },
-      artifactUrls: {
-        representationJson: "/manus-storage/result.json",
-        featuresNpz: "/manus-storage/features.npz",
-        reconstructedPng: "/manus-storage/reconstructed.png",
-      svg: "/manus-storage/reconstruction.svg",
-      overlays: {},
-      reconstructions: {},
-      errors: {},
-      },
-    });
-    const caller = imageAnalysisRouter.createCaller({} as never);
+  it("invokes the child-process bridge through an authenticated typed v0.6 request", async () => {
+    vi.mocked(analyzeImage).mockResolvedValue({ jobId: "job-123", ownerId: "1", representation: { version: "0.6.0" }, artifactUrls: { representationJson: "/manus-storage/result.json", featuresNpz: "/manus-storage/features.npz", reconstructedPng: "/manus-storage/reconstructed.png", svg: "/manus-storage/reconstruction.svg", overlays: {}, reconstructions: {}, errors: {} } });
+    const caller = imageAnalysisRouter.createCaller(userContext);
     const response = await caller.process(baseInput);
 
-    expect(analyzeImage).toHaveBeenCalledWith(baseInput, expect.any(String));
+    expect(analyzeImage).toHaveBeenCalledWith(baseInput, "1", expect.any(String));
     expect(response.jobId).toBe("job-123");
   });
 
   it("returns a typed throttling response when local admission is exhausted", async () => {
     vi.mocked(analyzeImage).mockRejectedValue(new AnalysisAdmissionError("Analysis capacity is busy. Please retry shortly."));
-    const caller = imageAnalysisRouter.createCaller({} as never);
+    const caller = imageAnalysisRouter.createCaller(userContext);
     await expect(caller.process(baseInput)).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS", message: expect.stringMatching(/capacity is busy/i) });
   });
 
-  it("returns a not-found error for an unavailable in-memory result", async () => {
-    vi.mocked(getAnalysisResult).mockReturnValue(null);
-    const caller = imageAnalysisRouter.createCaller({} as never);
+  it("requires authentication for analysis submission and result inspection", async () => {
+    const anonymous = imageAnalysisRouter.createCaller({ user: null } as never);
+    await expect(anonymous.process(baseInput)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(anonymous.result({ jobId: "missing" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
 
+  it("returns a not-found error for an unavailable owned in-memory result", async () => {
+    vi.mocked(getAnalysisResult).mockReturnValue(null);
+    const caller = imageAnalysisRouter.createCaller(userContext);
     await expect(caller.result({ jobId: "missing" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("returns individual entity, hierarchy, relationship, and artifact views for a completed result", async () => {
-    const completedResult = {
-      jobId: "job-123",
-      representation: {
-        hierarchy: { rootId: "root" },
-        pixelLevel: { assignmentKey: "pixelToMicroregion" },
-        scaleLevels: [],
-        entities: [{ id: "root" }, { id: "region-1" }],
-        relationships: [{ sourceId: "root", targetId: "region-1" }],
-      },
-      artifactUrls: { representationJson: "/result.json", featuresNpz: "/features.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: {}, reconstructions: {}, errors: {} },
-    };
+  it("returns entity, hierarchy, relationship, and artifact views only to the result owner", async () => {
+    const completedResult = { jobId: "job-123", ownerId: "1", representation: { hierarchy: { rootId: "root" }, pixelLevel: { assignmentKey: "pixelToMicroregion" }, scaleLevels: [], entities: [{ id: "root" }, { id: "region-1" }], relationships: [{ sourceId: "root", targetId: "region-1" }] }, artifactUrls: { representationJson: "/result.json", featuresNpz: "/features.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: {}, reconstructions: {}, errors: {} } };
     vi.mocked(getAnalysisResult).mockReturnValue(completedResult);
-    const caller = imageAnalysisRouter.createCaller({} as never);
+    const owner = imageAnalysisRouter.createCaller(userContext);
+    const otherUser = imageAnalysisRouter.createCaller({ user: { id: 2, role: "user" } } as never);
 
-    await expect(caller.entity({ jobId: "job-123", entityId: "region-1" })).resolves.toEqual({ id: "region-1" });
-    await expect(caller.hierarchy({ jobId: "job-123" })).resolves.toMatchObject({ hierarchy: { rootId: "root" }, pixelLevel: { assignmentKey: "pixelToMicroregion" } });
-    await expect(caller.relationships({ jobId: "job-123", entityId: "region-1" })).resolves.toHaveLength(1);
-    await expect(caller.artifacts({ jobId: "job-123" })).resolves.toMatchObject({ svg: "/reconstruction.svg" });
+    await expect(owner.entity({ jobId: "job-123", entityId: "region-1" })).resolves.toEqual({ id: "region-1" });
+    await expect(owner.hierarchy({ jobId: "job-123" })).resolves.toMatchObject({ hierarchy: { rootId: "root" } });
+    await expect(owner.relationships({ jobId: "job-123", entityId: "region-1" })).resolves.toHaveLength(1);
+    await expect(owner.artifacts({ jobId: "job-123" })).resolves.toMatchObject({ svg: "/reconstruction.svg" });
+    await expect(otherUser.result({ jobId: "job-123" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(otherUser.artifacts({ jobId: "job-123" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("returns aggregate cache telemetry only to administrators", async () => {
     const telemetry = { scope: "process_local_aggregate", activeEntries: 8, capacity: 100, ttlMs: 1_800_000, fillRatio: 0.08, writes: 10, lookups: 14, hits: 9, misses: 5, hitRate: 9 / 14, expiredEvictions: 2, capacityEvictions: 0, totalEvictions: 2, processStartedAt: 1_000, lastActivityAt: 2_000 };
     vi.mocked(getAnalysisCacheTelemetry).mockReturnValue(telemetry);
-    const adminCaller = imageAnalysisRouter.createCaller({ user: { role: "admin" } } as never);
-    const userCaller = imageAnalysisRouter.createCaller({ user: { role: "user" } } as never);
+    const adminCaller = imageAnalysisRouter.createCaller({ user: { id: 9, role: "admin" } } as never);
+    const userCaller = imageAnalysisRouter.createCaller(userContext);
 
     await expect(adminCaller.cacheTelemetry()).resolves.toEqual(telemetry);
     expect(getAnalysisCacheTelemetry).toHaveBeenCalledTimes(1);

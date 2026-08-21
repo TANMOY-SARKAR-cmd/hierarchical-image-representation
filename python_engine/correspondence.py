@@ -44,3 +44,28 @@ def match_scales(base_entities: List[Dict[str, Any]], base_masks: Dict[str, np.n
         source["crossScaleMatchId"] = target["id"]
         links.append({"sourceId": source["id"], "targetId": target["id"], "relationshipType": ["cross_scale_correspondence"], "confidence": rounded(1.0 - detail["cost"], 8), **{key: rounded(value, 8) for key, value in detail.items()}})
     return links
+
+
+def overlap_scales(base_entities: List[Dict[str, Any]], base_masks: Dict[str, np.ndarray], coarse_entities: List[Dict[str, Any]], coarse_masks: Dict[str, np.ndarray], factor: int, shape: Tuple[int, int], minimum_coverage: float) -> List[Dict[str, Any]]:
+    """Emit all meaningful fine-to-coarse mask overlaps without implying containment."""
+    links: List[Dict[str, Any]] = []
+    for source in base_entities:
+        source_mask = base_masks[source["id"]]
+        source_area = max(int(source_mask.sum()), 1)
+        for target in coarse_entities:
+            target_mask = lifted_mask(coarse_masks[target["id"]], shape)
+            intersection = int(np.logical_and(source_mask, target_mask).sum())
+            if not intersection:
+                continue
+            coverage = intersection / source_area
+            union = int(np.logical_or(source_mask, target_mask).sum())
+            overlap_iou = intersection / max(union, 1)
+            if coverage < minimum_coverage:
+                continue
+            source.setdefault("crossScaleOverlapIds", []).append(target["id"])
+            links.append({
+                "sourceId": source["id"], "targetId": target["id"], "relationshipType": ["cross_scale_overlap"], "primaryType": "cross_scale_overlap", "entityLevel": source["level"],
+                "confidence": rounded(coverage, 8), "fineCoverage": rounded(coverage, 8), "overlapIoU": rounded(overlap_iou, 8), "resolutionFactor": factor,
+                "semantics": "fine_to_coarse_overlap_not_hierarchy_containment",
+            })
+    return links

@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from correspondence import match_scales
+from correspondence import match_scales, overlap_scales
 from features import PIXEL_VECTOR_FIELDS, extract_features
 from geometry import make_entity, rounded
 from graph import build_relationships, containment_edge
@@ -22,6 +22,7 @@ from residuals import bounded_residual
 from rd_optimizer import rate_distortion
 from schema import SCHEMA_VERSION, config_hash, resolved_config
 from segmentation import label_adjacency, segment_image, shared_boundary_lengths
+from sensitivity import run_parameter_sensitivity
 
 
 def load_rgb(input_path: Path) -> np.ndarray:
@@ -122,7 +123,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     _, _, base_labels, micro_regions, masks, label_by_id = scale_data[1]
     base_adjacency, shared_boundaries = graph_edges_for_labels(label_by_id, base_labels)
 
-    scale_by_factor = {item["resolutionFactor"]: item for item in scales}; cross_scale: List[Dict[str, Any]] = []
+    scale_by_factor = {item["resolutionFactor"]: item for item in scales}; cross_scale: List[Dict[str, Any]] = []; cross_scale_overlaps: List[Dict[str, Any]] = []
     image_pixels = height * width
     if not config.get("runScaleConsistency", True):
         correspondence_status = "disabled"
@@ -138,7 +139,9 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
                 continue
             _, _, _, coarse_entities, coarse_masks, _ = scale_data[factor]
             links = match_scales(micro_regions, masks, coarse_entities, coarse_masks, factor, (height, width))
-            scale_by_factor[1]["crossScaleLinks"].extend(links); cross_scale.extend(links)
+            overlap_links = overlap_scales(micro_regions, masks, coarse_entities, coarse_masks, factor, (height, width), float(config["crossScaleOverlapThreshold"]))
+            scale_by_factor[1]["crossScaleLinks"].extend(links); scale_by_factor[1].setdefault("crossScaleOverlapLinks", []).extend(overlap_links)
+            cross_scale.extend(links); cross_scale_overlaps.extend(overlap_links)
         profile["crossScaleCorrespondenceMs"] = rounded((time.perf_counter() - correspondence_started) * 1000, 3)
 
     hierarchy_started = time.perf_counter()
@@ -146,7 +149,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     composites = graph_group_level(regions, masks, rgb, base_fields, "composite", 3, config, 0.92)
     entities_level = graph_group_level(composites, masks, rgb, base_fields, "entity", 4, config, 0.84)
     root_mask = np.ones((height, width), dtype=bool)
-    root = make_entity("image-root", "image", 5, 1, root_mask, rgb, base_fields, [entity["id"] for entity in entities_level], {"operation": "root", "parents": [entity["id"] for entity in entities_level]})
+    root = make_entity("image-root", "image", 5, 1, root_mask, rgb, base_fields, [entity["id"] for entity in entities_level], {"operation": "root_anchor", "parents": [entity["id"] for entity in entities_level], "semantics": "explicit_full_image_anchor_not_inferred_agglomeration"})
     for entity in entities_level: entity["parentId"] = root["id"]
     masks[root["id"]] = root_mask; all_entities = micro_regions + regions + composites + entities_level + [root]
     profile["graphAgglomerationMs"] = rounded((time.perf_counter() - hierarchy_started) * 1000, 3)
@@ -157,7 +160,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     for entity in all_entities:
         for child_id in entity["children"]:
             relationships.append(containment_edge(entity, next(child for child in all_entities if child["id"] == child_id)))
-    relationships.extend(cross_scale); profile["relationshipConstructionMs"] = rounded((time.perf_counter() - relationship_started) * 1000, 3)
+    relationships.extend(cross_scale); relationships.extend(cross_scale_overlaps); profile["relationshipConstructionMs"] = rounded((time.perf_counter() - relationship_started) * 1000, 3)
     write_relationship_overlay(rgb, micro_regions, [edge for edge in relationships if edge.get("entityLevel") == 1], overlays_dir / "relationship-graph.png")
     write_relationship_overlay(rgb, micro_regions, [edge for edge in relationships if edge.get("entityLevel") == 1], overlays_dir / "normalized-distance-graph.png", True)
 
@@ -171,11 +174,13 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     constant_reconstruction = full_reconstruction
     fit_entity_models(micro_regions, masks, rgb, base_fields, config)
     parametric_reconstruction = reconstruct_adaptive(micro_regions, masks, rgb.shape)
-    residual_reconstruction, quantized_residual, residual_metadata = bounded_residual(rgb, parametric_reconstruction, config)
+    residual_reconstruction, quantized_residual, encoded_residual, residual_metadata = bounded_residual(rgb, parametric_reconstruction, config)
     Image.fromarray(constant_reconstruction, mode="RGB").save(recon_dir / "constant.png")
     Image.fromarray(parametric_reconstruction, mode="RGB").save(recon_dir / "parametric.png")
     Image.fromarray(residual_reconstruction, mode="RGB").save(recon_dir / "residual.png")
-    np.savez_compressed(output_dir / "residuals.npz", quantizedResidual=quantized_residual, quantizationStep=np.array([residual_metadata["quantizationStep"]], dtype=np.int16))
+    if encoded_residual is not None:
+        (output_dir / "residuals.npz").write_bytes(encoded_residual)
+        residual_metadata["artifact"] = "residuals.npz"
     reconstruction_metadata["constant"] = {"artifact": "reconstructions/constant.png", "entityCount": len(micro_regions), "model": "constant", **metrics_for(rgb, constant_reconstruction)}
     reconstruction_metadata["parametric"] = {"artifact": "reconstructions/parametric.png", "entityCount": len(micro_regions), "model": "adaptive_lab", **metrics_for(rgb, parametric_reconstruction)}
     reconstruction_metadata["residual"] = {"artifact": "reconstructions/residual.png", "entityCount": len(micro_regions), "model": "adaptive_lab_plus_quantized_residual", "residual": residual_metadata, **metrics_for(rgb, residual_reconstruction)}
@@ -187,12 +192,13 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     residual_energy = np.abs(quantized_residual.astype(np.float32)).mean(axis=2)
     write_overlay(absolute_error, error_dir / "absolute-error.png", cv2.COLORMAP_INFERNO); write_overlay(parametric_error, error_dir / "parametric-error.png", cv2.COLORMAP_INFERNO); write_overlay(per_region_error, error_dir / "per-region-error.png", cv2.COLORMAP_MAGMA); write_overlay(residual_energy, error_dir / "residual-energy.png", cv2.COLORMAP_TURBO); create_svg(base_labels, rgb, output_dir / "reconstruction.svg")
     profile["reconstructionMs"] = rounded((time.perf_counter() - reconstruction_started) * 1000, 3)
+    sensitivity_report = run_parameter_sensitivity(input_path, output_dir, config, analyze) if config.get("runParameterSensitivity", False) else None
 
     validity = validate_representation(all_entities, masks, root["id"])
     correspondence_summary = {
         "status": correspondence_status,
         "correspondenceMethod": "Hungarian IoU/centroid/appearance/area cost",
-        "matchedEntityCount": len(cross_scale),
+        "matchedEntityCount": len(cross_scale), "overlapLinkCount": len(cross_scale_overlaps),
         "centroidStability": rounded(float(np.mean([item["centroidDistance"] for item in cross_scale])) if cross_scale else 0.0, 8),
         "sizeRatioStability": rounded(float(np.mean([item["logAreaDifference"] for item in cross_scale])) if cross_scale else 0.0, 8),
         "brightnessStability": 0.0,
@@ -205,22 +211,26 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     model_bytes = int(sum(entity.get("appearanceModel", {}).get("parameterCount", 0) for entity in micro_regions) * 4)
     heuristic_rd_summary = {"basis": "parameter_payload_estimate_not_serialized_storage", "modes": {"constant": rate_distortion(constant_metrics["mse"], len(micro_regions) * 12, height * width, config), "parametric": rate_distortion(parametric_metrics["mse"], model_bytes, height * width, config), "residual": residual_metadata["heuristicRateDistortion"]}}
     quality = {**residual_metrics, "sourceBytes": source_bytes, "rawRgbBytes": int(rgb.nbytes), "representationBytes": 0, "reconstructedBytes": 0, "representationOverhead": 0.0, "processingTimeMs": 0.0}
-    experiment = {"id": f"exp-{config_hash(config)}-{int(started * 1000)}", "engineVersion": SCHEMA_VERSION, "configHash": config_hash(config), "algorithm": "fixed_depth_greedy_pairwise_graph_grouping+adaptive_reconstruction", "timestampEpochMs": int(time.time() * 1000), "researchPrototype": True}
+    experiment = {"id": f"exp-{config_hash(config)}-{int(started * 1000)}", "engineVersion": SCHEMA_VERSION, "configHash": config_hash(config), "algorithm": "fixed_depth_iterative_graph_agglomeration+adaptive_reconstruction", "timestampEpochMs": int(time.time() * 1000), "researchPrototype": True}
     representation: Dict[str, Any] = {
         "representation_version": SCHEMA_VERSION, "version": SCHEMA_VERSION, "coordinateSystem": "pixel coordinates are [x, y]; boundingBox is [minX, minY, maxX, maxY], inclusive", "experiment": experiment, "configuration": config,
         "image": {"width": width, "height": height, "channels": 3, "sourceBytes": source_bytes}, "image_metadata": {"width": width, "height": height, "channels": 3, "sourceBytes": source_bytes},
-        "feature_schema": {"PixelVector": {"fields": PIXEL_VECTOR_FIELDS, "shape": list(base_tensor.shape), "categories": ["geometry", "appearance", "local_structure"], "normalization": "coordinates use fixed image bounds; local positive fields use median/MAD robust scaling clipped to [-1,1]", "storage": "features.npz:pixelVectors"}, "EntityVector": {"schema": "EntityVector@0.5", "storage": "entities[].vector", "categories": ["geometry", "appearance", "structure", "shape"]}, "AppearanceModel": {"schema": "AppearanceModel@0.5", "storage": "entities[].appearanceModel", "candidates": config["appearanceModelCandidates"]}},
+        "feature_schema": {"PixelVector": {"fields": PIXEL_VECTOR_FIELDS, "shape": list(base_tensor.shape), "categories": ["geometry", "appearance", "local_structure"], "normalization": "coordinates use fixed image bounds; local positive fields use median/MAD robust scaling clipped to [-1,1]", "storage": "features.npz:pixelVectors"}, "EntityVector": {"schema": "EntityVector@0.6", "storage": "entities[].vector", "categories": ["geometry", "appearance", "structure", "shape"]}, "AppearanceModel": {"schema": "AppearanceModel@0.5", "storage": "entities[].appearanceModel", "candidates": config["appearanceModelCandidates"]}},
         "features": {"shape": list(base_tensor.shape), "channels": PIXEL_VECTOR_FIELDS, "artifact": "features.npz"}, "pixelLevel": {"assignmentArtifact": "features.npz", "assignmentKey": "pixelToMicroregion", "labelToMicroregionId": {str(label): f"resolution-1-micro-region-{label}" for label in range(1, int(base_labels.max()) + 1)}},
-        "resolutionPyramid": scales, "scales": scales, "scaleLevels": scales, "hierarchy": {"levels": {"pixel": 0, "micro_region": 1, "region": 2, "composite": 3, "entity": 4, "image": 5}, "rootId": root["id"], "grouping": "fixed-depth greedy pairwise connectivity-constrained graph grouping"}, "entities": all_entities, "relationships": relationships,
-        "graph_metadata": {"construction": "region adjacency plus spatial/appearance KNN candidates; fixed-depth greedy pairwise grouping uses merge affinity", "relationshipDensity": rounded(len(relationships) / max(len(all_entities), 1), 8), "candidateSources": ["adjacent", "spatial_knn", "appearance_knn", "hierarchy"]}, "segmentationDiagnostics": segmentation_diagnostics,
+        "resolutionPyramid": scales, "scales": scales, "scaleLevels": scales, "hierarchy": {"levels": {"pixel": 0, "micro_region": 1, "region": 2, "composite": 3, "entity": 4, "image": 5}, "rootId": root["id"], "grouping": "fixed-depth iterative connectivity-constrained graph agglomeration", "rootSemantics": "explicit_full_image_anchor_not_inferred_agglomeration"}, "entities": all_entities, "relationships": relationships,
+        "graph_metadata": {"construction": "region adjacency plus spatial/appearance KNN candidates; iterative grouping recomputes active merge candidates after every accepted union", "relationshipDensity": rounded(len(relationships) / max(len(all_entities), 1), 8), "candidateSources": ["adjacent", "spatial_knn", "appearance_knn", "hierarchy", "cross_scale_overlap"]}, "segmentationDiagnostics": segmentation_diagnostics,
         "normalization_methods": {"normalizedDistance": "distance / image diagonal", "logAreaRatio": "log((source area + epsilon) / (target area + epsilon))", "logBrightnessRatio": "log((source brightness + epsilon) / (target brightness + epsilon))", "colorDistance": "Euclidean CIE Lab distance over normalized Lab components"},
-        "reconstruction_metadata": {"outputs": reconstruction_metadata, "heuristicRateDistortion": heuristic_rd_summary, "residual": residual_metadata, "errorArtifacts": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}}, "scale_correspondence": {"method": "Hungarian minimum cost on IoU, normalized centroid, appearance, and log-area terms", "links": cross_scale}, "scale_consistency": correspondence_summary, "validity": validity, "profiling": profile, "researchPrototype": {"status": "deterministic_internal_evaluation", "notScientificValidation": True, "notCodecRateMeasurement": True}, "artifactStorage": {"schema": "ArtifactStorage@0.5", "basis": "actual_emitted_file_bytes", "files": {}, "totalBytes": 0},
-        "artifacts": {"features": "features.npz", "residuals": "residuals.npz", "reconstructedPng": "reconstructed.png", "svg": "reconstruction.svg", "reconstructions": {name: value["artifact"] for name, value in reconstruction_metadata.items()}, "errors": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}, "overlays": {"brightness": "overlays/brightness.png", "edgeStrength": "overlays/edge-strength.png", "gradientX": "overlays/gradient-x.png", "gradientY": "overlays/gradient-y.png", "complexity": "overlays/complexity.png", "relationshipGraph": "overlays/relationship-graph.png", "normalizedDistanceGraph": "overlays/normalized-distance-graph.png", "residualEnergy": "errors/residual-energy.png"}}, "metrics": quality, "quality_metrics": quality,
+        "reconstruction_metadata": {"outputs": reconstruction_metadata, "heuristicRateDistortion": heuristic_rd_summary, "residual": residual_metadata, "errorArtifacts": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}}, "scale_correspondence": {"method": "Hungarian one-to-one best match on IoU, normalized centroid, appearance, and log-area terms", "bestMatches": cross_scale, "overlapLinks": cross_scale_overlaps, "links": cross_scale}, "scale_consistency": correspondence_summary, "parameterSensitivity": sensitivity_report, "validity": validity, "profiling": profile, "researchPrototype": {"status": "deterministic_internal_evaluation", "notScientificValidation": True, "notCodecRateMeasurement": True}, "artifactStorage": {"schema": "ArtifactStorage@0.6", "basis": "actual_emitted_file_bytes", "files": {}, "totalBytes": 0},
+        "artifacts": {"features": "features.npz", "residuals": residual_metadata.get("artifact"), "parameterSensitivity": "sensitivity/report.json" if sensitivity_report else None, "reconstructedPng": "reconstructed.png", "svg": "reconstruction.svg", "reconstructions": {name: value["artifact"] for name, value in reconstruction_metadata.items()}, "errors": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}, "overlays": {"brightness": "overlays/brightness.png", "edgeStrength": "overlays/edge-strength.png", "gradientX": "overlays/gradient-x.png", "gradientY": "overlays/gradient-y.png", "complexity": "overlays/complexity.png", "relationshipGraph": "overlays/relationship-graph.png", "normalizedDistanceGraph": "overlays/normalized-distance-graph.png", "residualEnergy": "errors/residual-energy.png"}}, "metrics": quality, "quality_metrics": quality,
     }
     serialization_started = time.perf_counter(); representation_path = output_dir / "representation.json"; quality["processingTimeMs"] = rounded((time.perf_counter() - started) * 1000, 3)
     for _ in range(5):
         representation_path.write_text(json.dumps(representation, separators=(",", ":")), encoding="utf-8")
         measured_storage = collect_artifact_storage(output_dir)
+        for output in reconstruction_metadata.values():
+            output["artifactBytes"] = measured_storage["files"].get(output["artifact"], 0)
+        residual_metadata["actualEncodedBytes"] = measured_storage["files"].get("residuals.npz", 0)
+        residual_metadata["budgetMet"] = residual_metadata["actualEncodedBytes"] <= int(config["residualBudgetBytes"])
         quality["representationBytes"] = measured_storage["files"].get("representation.json", 0) + measured_storage["files"].get("features.npz", 0)
         quality["reconstructedBytes"] = measured_storage["files"].get("reconstructed.png", 0)
         quality["representationOverhead"] = rounded(quality["representationBytes"] / max(quality["rawRgbBytes"], 1), 8)

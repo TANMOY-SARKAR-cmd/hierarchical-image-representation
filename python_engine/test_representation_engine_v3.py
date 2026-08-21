@@ -34,7 +34,8 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertIn("configHash", representation["experiment"])
             fields = representation["feature_schema"]["PixelVector"]["fields"]
             self.assertIn("appearance.lab_l", fields); self.assertIn("local_structure.gradient_orientation", fields)
-            self.assertEqual(representation["hierarchy"]["grouping"], "fixed-depth greedy pairwise connectivity-constrained graph grouping")
+            self.assertEqual(representation["hierarchy"]["grouping"], "fixed-depth iterative connectivity-constrained graph agglomeration")
+            self.assertEqual(representation["hierarchy"]["rootSemantics"], "explicit_full_image_anchor_not_inferred_agglomeration")
             self.assertTrue(representation["experiment"]["researchPrototype"])
             self.assertTrue(representation["validity"]["valid"])
             self.assertAlmostEqual(representation["validity"]["leafCoverage"], 1.0)
@@ -61,10 +62,12 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertTrue(any(item.get("primaryType") == "contains" for item in representation["relationships"]))
             self.assertEqual(representation["scale_correspondence"]["method"].split(" ")[0], "Hungarian")
             self.assertGreater(len(representation["scale_correspondence"]["links"]), 0)
+            self.assertGreater(len(representation["scale_correspondence"]["overlapLinks"]), 0)
+            self.assertTrue(all(link["primaryType"] == "cross_scale_overlap" and link["semantics"] == "fine_to_coarse_overlap_not_hierarchy_containment" for link in representation["scale_correspondence"]["overlapLinks"]))
             self.assertTrue(all(0 <= link["confidence"] <= 1 and link["cost"] <= 0.72 for link in representation["scale_correspondence"]["links"]))
             self.assertTrue(all("crossScaleParentId" not in entity for entity in representation["entities"]))
             self.assertTrue(any(entity.get("crossScaleMatchId") for entity in representation["entities"]))
-            self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.5")
+            self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.6")
             self.assertIn("slic", representation["segmentationDiagnostics"])
             self.assertIn("residual", representation["reconstruction_metadata"]["outputs"])
             self.assertIn("parametric", representation["reconstruction_metadata"]["heuristicRateDistortion"]["modes"])
@@ -72,6 +75,12 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertEqual(representation["artifactStorage"]["basis"], "actual_emitted_file_bytes")
             self.assertEqual(representation["artifactStorage"]["files"]["features.npz"], (output / "features.npz").stat().st_size)
             self.assertEqual(representation["artifactStorage"]["files"]["residuals.npz"], (output / "residuals.npz").stat().st_size)
+            residual = representation["reconstruction_metadata"]["residual"]
+            self.assertTrue(residual["artifactEmitted"])
+            self.assertEqual(residual["actualEncodedBytes"], (output / "residuals.npz").stat().st_size)
+            self.assertLessEqual(residual["actualEncodedBytes"], representation["configuration"]["residualBudgetBytes"])
+            with np.load(output / "residuals.npz") as sparse:
+                self.assertEqual(set(sparse.files), {"indices", "values", "shape", "quantizationStep"})
             self.assertTrue(all(entity.get("appearanceModel", {}).get("model") in {"constant", "affine", "quadratic"} for entity in representation["entities"] if entity["type"] == "micro_region"))
             self.assertTrue(all("boundaryResidual" in entity.get("appearanceModel", {}) for entity in representation["entities"] if entity["type"] == "micro_region"))
             for relative_path in ("features.npz", "residuals.npz", "representation.json", "reconstructed.png", "reconstruction.svg", "overlays/relationship-graph.png", "reconstructions/level4.png", "reconstructions/parametric.png", "reconstructions/residual.png", "errors/residual-energy.png"):
@@ -164,6 +173,41 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
         self.assertEqual(permitted[0]["lineage"]["mergeEvidence"]["edgeBarrierThreshold"], 1.0)
         with self.assertRaisesRegex(ValueError, "Unsupported segmentation strategy"):
             segment_image(image, "felzenzwalb", 16, 10, 1)
+
+    def test_iterative_agglomeration_can_extend_a_chain_within_one_level(self):
+        from features import extract_features
+        from schema import resolved_config
+
+        image = np.full((12, 18, 3), 120, dtype=np.uint8)
+        config = resolved_config({"minimumRegionPixels": 1, "mergeThreshold": 0.1, "maxEntityAreaFraction": 1.0, "edgeBarrierThreshold": 1.0, "maxAgglomerationIterations": 10})
+        _, fields = extract_features(image, config); fields["edge_strength"][:] = 0.0
+        masks = {}
+        children = []
+        for index, start in enumerate((0, 6, 12)):
+            mask = np.zeros((12, 18), dtype=bool); mask[:, start:start + 6] = True
+            entity_id = f"part-{index}"
+            masks[entity_id] = mask
+            children.append(make_entity(entity_id, "micro_region", 1, 1, mask, image, fields))
+        parents = graph_group_level(children, masks, image, fields, "region", 2, config, 1.0)
+        self.assertEqual(len(parents), 1)
+        self.assertCountEqual(parents[0]["children"], ["part-0", "part-1", "part-2"])
+        self.assertEqual(parents[0]["lineage"]["operation"], "iterative_merge")
+        self.assertEqual(parents[0]["lineage"]["iterationCount"], 2)
+        self.assertEqual(len(parents[0]["lineage"]["mergeSequence"]), 2)
+
+    def test_tiny_residual_budget_omits_an_unrepresentable_sparse_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            image = np.zeros((24, 24, 3), dtype=np.uint8); image[:, :12] = [20, 160, 230]; image[:, 12:] = [220, 80, 50]
+            source = workspace / "fixture.png"; Image.fromarray(image).save(source)
+            output = workspace / "tiny-budget"
+            payload = json.loads(Path(analyze(source, output, {"maxImagePixels": 10_000, "scaleLevels": [1], "slicSegments": 16, "minimumRegionPixels": 2, "residualBudgetBytes": 1})["representationPath"]).read_text())
+            residual = payload["reconstruction_metadata"]["residual"]
+            self.assertFalse(residual["artifactEmitted"])
+            self.assertTrue(residual["noPayloadFitsBudget"])
+            self.assertEqual(residual["actualEncodedBytes"], 0)
+            self.assertIsNone(payload["artifacts"]["residuals"])
+            self.assertFalse((output / "residuals.npz").exists())
 
 
 if __name__ == "__main__":

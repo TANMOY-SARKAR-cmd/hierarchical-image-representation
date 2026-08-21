@@ -46,14 +46,16 @@ describe("Node-to-Python image analysis integration", () => {
     expect(representation.relationships.length).toBeGreaterThan(0);
     expect(representation.metrics.ssim).toBeGreaterThanOrEqual(0);
     expect(representation.metrics.processingTimeMs).toBeGreaterThan(0);
-    expect(uploadedArtifacts).toHaveLength(25);
 
     const jsonArtifact = uploadedArtifacts.find(item => item.contentType === "application/json");
     const npzArtifacts = uploadedArtifacts.filter(item => item.contentType === "application/octet-stream");
     const pngArtifacts = uploadedArtifacts.filter(item => item.contentType === "image/png");
     const svgArtifact = uploadedArtifacts.find(item => item.contentType === "image/svg+xml");
-    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ representation_version: "0.5.0", hierarchy: { grouping: "fixed-depth greedy pairwise connectivity-constrained graph grouping" }, reconstruction_metadata: { outputs: { parametric: expect.any(Object), residual: expect.any(Object) }, heuristicRateDistortion: { basis: "parameter_payload_estimate_not_serialized_storage" } }, artifactStorage: { basis: "actual_emitted_file_bytes" } });
-    expect(npzArtifacts).toHaveLength(2);
+    const uploadedRepresentation = JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}") as { reconstruction_metadata?: { residual?: { artifactEmitted?: boolean; actualEncodedBytes?: number } } };
+    expect(uploadedRepresentation).toMatchObject({ representation_version: "0.6.0", hierarchy: { grouping: "fixed-depth iterative connectivity-constrained graph agglomeration" }, reconstruction_metadata: { outputs: { parametric: expect.any(Object), residual: expect.any(Object) }, heuristicRateDistortion: { basis: "parameter_payload_estimate_not_serialized_storage" } }, artifactStorage: { basis: "actual_emitted_file_bytes" } });
+    const residualEmitted = Boolean(uploadedRepresentation.reconstruction_metadata?.residual?.artifactEmitted);
+    expect(uploadedArtifacts).toHaveLength(residualEmitted ? 25 : 24);
+    expect(npzArtifacts).toHaveLength(residualEmitted ? 2 : 1);
     expect(npzArtifacts.every(item => item.data.subarray(0, 4).toString("latin1") === "PK\u0003\u0004")).toBe(true);
     expect(pngArtifacts).toHaveLength(21);
     expect(pngArtifacts.every(item => item.data.subarray(1, 4).toString("ascii") === "PNG")).toBe(true);

@@ -82,3 +82,12 @@
 - [x] Add strict base64 and file-signature validation plus bounded public submission quota and concurrent-job admission control.
 - [x] Archive inactive legacy engine paths while preserving active v0.2–v0.5 representation compatibility.
 - [x] Update the workbench, regression tests, benchmark terminology, documentation, validation, checkpointing, synchronization, and delivery for v0.5.
+- [x] Advance the active representation contract to v0.6 with iterative agglomeration, overlap correspondence, measured residual encoding, and owner-scoped analysis metadata.
+- [x] Replace fixed-depth greedy pair grouping with deterministic iterative connectivity-constrained graph agglomeration and lineage evidence.
+- [x] Add many-to-one cross-scale overlap links distinct from Hungarian best-match correspondence.
+- [x] Replace synthetic residual capacity estimates with actual sparse compressed residual artifacts that meet configured byte budgets.
+- [x] Separate heuristic model scoring, reconstruction-artifact bytes, residual-encoding bytes, and full-bundle storage reporting.
+- [x] Require authenticated owner-scoped analysis creation and inspection, with strict per-owner result access tests.
+- [x] Consolidate the active Python CLI path, remove stale active configuration, and retain only documented compatibility shims.
+- [x] Add a deterministic parameter-sensitivity evidence harness and workbench inspection/export access.
+- [ ] Update tests, documentation, validation, checkpointing, synchronization, and delivery for v0.6.
