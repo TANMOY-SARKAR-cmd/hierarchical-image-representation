@@ -62,7 +62,14 @@ export type AnalysisArtifactUrls = {
   svg: string;
   overlays: Record<string, string>;
   reconstructions: Record<string, string>;
-  errors: Record<string, string>;
+  errors: {
+    absolutePixelError?: string;
+    parametricError?: string;
+    perRegionError?: string;
+    residualEnergy?: string;
+    byReconstruction?: Record<string, string>;
+    [key: string]: string | Record<string, string> | undefined;
+  };
 };
 
 export type AnalysisResult = {
@@ -412,11 +419,13 @@ export async function analyzeImage(input: {
       parametric: await uploadArtifact(jobId, outputPath, "reconstructions/parametric.png", "image/png"),
       residual: await uploadArtifact(jobId, outputPath, "reconstructions/residual.png", "image/png"),
     };
+    const byReconstruction = Object.fromEntries(await Promise.all(["level1", "level2", "level3", "level4", "full", "constant", "parametric", "residual"].map(async mode => [mode, await uploadArtifact(jobId, outputPath, `errors/by-reconstruction/${mode}.png`, "image/png")] as const)));
     const errors = {
       absolutePixelError: await uploadArtifact(jobId, outputPath, "errors/absolute-error.png", "image/png"),
       parametricError: await uploadArtifact(jobId, outputPath, "errors/parametric-error.png", "image/png"),
       perRegionError: await uploadArtifact(jobId, outputPath, "errors/per-region-error.png", "image/png"),
       residualEnergy: await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png"),
+      byReconstruction,
     };
     const residualArtifact = (representation.artifacts as { residuals?: string | null } | undefined)?.residuals;
     const sensitivityArtifact = (representation.artifacts as { parameterSensitivity?: string | null } | undefined)?.parameterSensitivity;

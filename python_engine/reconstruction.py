@@ -36,6 +36,28 @@ def write_overlay(values: np.ndarray, output_path: Path, colormap: int = cv2.COL
     cv2.imwrite(str(output_path), cv2.applyColorMap((unit_normalize(values) * 255).astype(np.uint8), colormap))
 
 
+ERROR_HEATMAP_REFERENCE_MEAN_ABSOLUTE_RGB_DELTA = 32.0
+ERROR_HEATMAP_TRANSPARENT_BELOW_MEAN_ABSOLUTE_RGB_DELTA = 1.0
+
+
+def write_calibrated_error_heatmap(original: np.ndarray, reconstructed: np.ndarray, output_path: Path, reference_delta: float = ERROR_HEATMAP_REFERENCE_MEAN_ABSOLUTE_RGB_DELTA) -> Dict[str, float]:
+    """Write an RGBA error visualization whose color and alpha use fixed RGB-difference calibration."""
+    if reference_delta <= 0:
+        raise ValueError("reference_delta must be positive")
+    error = np.abs(original.astype(np.float32) - reconstructed.astype(np.float32)).mean(axis=2)
+    normalized = np.clip(error / reference_delta, 0.0, 1.0)
+    color = cv2.applyColorMap(np.rint(normalized * 255.0).astype(np.uint8), cv2.COLORMAP_INFERNO)
+    visible = np.clip((error - ERROR_HEATMAP_TRANSPARENT_BELOW_MEAN_ABSOLUTE_RGB_DELTA) / max(reference_delta - ERROR_HEATMAP_TRANSPARENT_BELOW_MEAN_ABSOLUTE_RGB_DELTA, 1e-9), 0.0, 1.0)
+    alpha = np.rint((visible ** 0.75) * 255.0).astype(np.uint8)
+    cv2.imwrite(str(output_path), np.dstack((color, alpha)))
+    return {
+        "meanAbsoluteRgbDelta": rounded(float(error.mean()), 8),
+        "maxAbsoluteRgbDelta": rounded(float(error.max()), 8),
+        "referenceMeanAbsoluteRgbDelta": rounded(reference_delta, 8),
+        "transparentBelowMeanAbsoluteRgbDelta": rounded(ERROR_HEATMAP_TRANSPARENT_BELOW_MEAN_ABSOLUTE_RGB_DELTA, 8),
+    }
+
+
 def create_svg(labels: np.ndarray, rgb: np.ndarray, output_path: Path) -> None:
     height, width = labels.shape
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" aria-label="Micro-region boundaries">']

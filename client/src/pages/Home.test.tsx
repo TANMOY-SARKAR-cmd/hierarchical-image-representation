@@ -39,9 +39,9 @@ const completedResult = {
       { ...baseRelationship, targetId: "image-root", normalizedDistance: 0.45, confidence: 0.7, relationshipType: ["similar_color"], primaryType: "similar_color", adjacent: false },
     ],
     metrics: { mse: 0, psnr: 99, ssim: 1, processingTimeMs: 10, representationBytes: 100, representationOverhead: 1 },
-    hierarchy: { rootId: "image-root", treeNodeIds: ["merge-1"], treeRootIds: ["merge-1"], cuts: { region: { targetNodeCount: 1, nodeIds: ["micro-1"], policy: "largest_leaf_count_expansion_from_tree_roots" }, composite: { targetNodeCount: 1, nodeIds: ["micro-1"], policy: "largest_leaf_count_expansion_from_tree_roots" }, entity: { targetNodeCount: 1, nodeIds: ["micro-1"], policy: "largest_leaf_count_expansion_from_tree_roots" } } }, feature_schema: { PixelVector: { fields: [] }, RegionVector: { fields: [], dimension: 20 } }, scales: [], segmentationDiagnostics: { slic: { strategy: "slic", entityCount: 72, meanBoundaryEdgeStrength: 0.11, requestedSegments: 72 }, watershed: { strategy: "watershed", entityCount: 68, meanBoundaryEdgeStrength: 0.15, requestedSegments: 72 } }, reconstruction_metadata: { outputs: { constant: { psnr: 24.1, ssim: 0.81 }, parametric: { psnr: 30.2, ssim: 0.91 }, residual: { psnr: 35.8, ssim: 0.96 } }, heuristicRateDistortion: { basis: "parameter_payload_estimate_not_serialized_storage", modes: { constant: { score: 0.09, estimatedBytes: 640 }, parametric: { score: 0.05, estimatedBytes: 920 }, residual: { score: 0.02, estimatedBytes: 1300 } } } }, scale_consistency: { status: "completed" }, profiling: {}, artifactStorage: { basis: "actual_emitted_file_bytes", totalBytes: 4096, files: { "representation.json": 512, "features.npz": 2048, "residuals.npz": 1536 } },
+    hierarchy: { rootId: "image-root", treeNodeIds: ["merge-1"], treeRootIds: ["merge-1"], cuts: { region: { targetNodeCount: 1, nodeIds: ["micro-1"], policy: "largest_leaf_count_expansion_from_tree_roots" }, composite: { targetNodeCount: 1, nodeIds: ["micro-1"], policy: "largest_leaf_count_expansion_from_tree_roots" }, entity: { targetNodeCount: 1, nodeIds: ["micro-1"], policy: "largest_leaf_count_expansion_from_tree_roots" } } }, feature_schema: { PixelVector: { fields: [] }, RegionVector: { fields: [], dimension: 20 } }, scales: [], segmentationDiagnostics: { slic: { strategy: "slic", entityCount: 72, meanBoundaryEdgeStrength: 0.11, requestedSegments: 72 }, watershed: { strategy: "watershed", entityCount: 68, meanBoundaryEdgeStrength: 0.15, requestedSegments: 72 } }, reconstruction_metadata: { outputs: { constant: { psnr: 24.1, ssim: 0.81 }, parametric: { psnr: 30.2, ssim: 0.91 }, residual: { psnr: 35.8, ssim: 0.96 } }, errorHeatmaps: { schema: "CalibratedAbsoluteRgbErrorHeatmap@0.7", semantics: "mean_absolute_rgb_difference_for_matching_reconstruction_artifact", referenceMeanAbsoluteRgbDelta: 32, transparentBelowMeanAbsoluteRgbDelta: 1, byReconstruction: { constant: { meanAbsoluteRgbDelta: 18.2, maxAbsoluteRgbDelta: 82.4 }, parametric: { meanAbsoluteRgbDelta: 9.3, maxAbsoluteRgbDelta: 47.8 }, residual: { meanAbsoluteRgbDelta: 2.6, maxAbsoluteRgbDelta: 21.1 } } }, heuristicRateDistortion: { basis: "parameter_payload_estimate_not_serialized_storage", modes: { constant: { score: 0.09, estimatedBytes: 640 }, parametric: { score: 0.05, estimatedBytes: 920 }, residual: { score: 0.02, estimatedBytes: 1300 } } } }, scale_consistency: { status: "completed" }, profiling: {}, artifactStorage: { basis: "actual_emitted_file_bytes", totalBytes: 4096, files: { "representation.json": 512, "features.npz": 2048, "residuals.npz": 1536 } },
   },
-  artifactUrls: { representationJson: "/representation.json", featuresNpz: "/features.npz", residualsNpz: "/residuals.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: { relationshipGraph: "/relationship.png", normalizedDistanceGraph: "/distance.png" }, reconstructions: { full: "/reconstructed.png", constant: "/constant.png", parametric: "/parametric.png", residual: "/residual.png" }, errors: { absolutePixelError: "/absolute-error.png" } },
+  artifactUrls: { representationJson: "/representation.json", featuresNpz: "/features.npz", residualsNpz: "/residuals.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: { relationshipGraph: "/relationship.png", normalizedDistanceGraph: "/distance.png" }, reconstructions: { full: "/reconstructed.png", constant: "/constant.png", parametric: "/parametric.png", residual: "/residual.png" }, errors: { absolutePixelError: "/absolute-error.png", byReconstruction: { constant: "/heatmap-constant.png", parametric: "/heatmap-parametric.png", residual: "/heatmap-residual.png" } } },
 };
 
 describe("Hierarchy workbench UI", () => {
@@ -183,6 +183,11 @@ describe("Hierarchy workbench UI", () => {
     expect(view.getByAltText("PARAMETRIC reconstruction")).toHaveAttribute("src", "/parametric.png");
     expect(view.getAllByText("PSNR 30.20 dB").length).toBeGreaterThan(0);
     expect(view.getByText(/parametric evidence/i)).toBeInTheDocument();
+    fireEvent.click(view.getByRole("button", { name: /error heatmap off/i }));
+    expect(view.getByAltText("parametric calibrated reconstruction error heatmap overlay")).toHaveAttribute("src", "/heatmap-parametric.png");
+    expect(view.getByAltText("PARAMETRIC reconstruction")).toHaveAttribute("src", "/parametric.png");
+    expect(view.getByText(/Paired with PARAMETRIC/i)).toBeInTheDocument();
+    fireEvent.click(view.getByRole("button", { name: /error heatmap on/i }));
     fireEvent.click(view.getByRole("button", { name: "DETAIL" }));
     expect(view.getByAltText("RESIDUAL reconstruction")).toHaveAttribute("src", "/residual.png");
     expect(view.getAllByText("PSNR 35.80 dB").length).toBeGreaterThan(0);
@@ -194,7 +199,8 @@ describe("Hierarchy workbench UI", () => {
     const errorOpacity = view.getByRole("slider", { name: "Error heatmap opacity" });
     expect(errorOpacity).toBeDisabled();
     fireEvent.click(view.getByRole("button", { name: /error heatmap off/i }));
-    expect(view.getByAltText("Absolute reconstruction error heatmap overlay")).toHaveAttribute("src", "/absolute-error.png");
+    expect(view.getByAltText("residual calibrated reconstruction error heatmap overlay")).toHaveAttribute("src", "/heatmap-residual.png");
+    expect(view.getByAltText("RESIDUAL reconstruction")).toHaveAttribute("src", "/residual.png");
     expect(errorOpacity).toBeEnabled();
     fireEvent.change(errorOpacity, { target: { value: "28" } });
     expect(errorOpacity).toHaveValue("28");

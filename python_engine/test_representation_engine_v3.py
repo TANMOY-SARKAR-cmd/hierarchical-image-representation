@@ -12,6 +12,7 @@ from engine import analyze
 from graph import relationship_for
 from geometry import make_entity
 from hierarchy import build_global_merge_tree, graph_group_level
+from reconstruction import write_calibrated_error_heatmap
 from reconstruction_models import fit_appearance_model
 from schema import SCHEMA_VERSION, read_compatible_representation
 from segmentation import segment_image
@@ -97,6 +98,25 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertTrue(all("boundaryResidual" in entity.get("appearanceModel", {}) for entity in representation["entities"] if entity["type"] == "micro_region"))
             for relative_path in ("features.npz", "residuals.npz", "representation.json", "reconstructed.png", "reconstruction.svg", "overlays/relationship-graph.png", "reconstructions/level4.png", "reconstructions/parametric.png", "reconstructions/residual.png", "errors/residual-energy.png"):
                 self.assertTrue((output / relative_path).exists(), relative_path)
+            heatmaps = representation["reconstruction_metadata"]["errorHeatmaps"]
+            self.assertEqual(heatmaps["schema"], "CalibratedAbsoluteRgbErrorHeatmap@0.7")
+            self.assertEqual(heatmaps["referenceMeanAbsoluteRgbDelta"], 32.0)
+            self.assertEqual(set(heatmaps["byReconstruction"]), {"level1", "level2", "level3", "level4", "full", "constant", "parametric", "residual"})
+            for name in heatmaps["byReconstruction"]:
+                self.assertTrue((output / f"errors/by-reconstruction/{name}.png").exists(), name)
+
+    def test_calibrated_error_heatmap_uses_fixed_rgb_delta_reference_and_transparent_low_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "heatmap.png"
+            original = np.zeros((2, 2, 3), dtype=np.uint8)
+            reconstructed = original.copy(); reconstructed[0, 1] = [16, 16, 16]; reconstructed[1, 1] = [64, 64, 64]
+            metadata = write_calibrated_error_heatmap(original, reconstructed, output)
+            rgba = np.asarray(Image.open(output).convert("RGBA"))
+            self.assertEqual(int(rgba[0, 0, 3]), 0)
+            self.assertGreater(int(rgba[0, 1, 3]), 0)
+            self.assertGreater(int(rgba[1, 1, 3]), int(rgba[0, 1, 3]))
+            self.assertEqual(metadata["referenceMeanAbsoluteRgbDelta"], 32.0)
+            self.assertEqual(metadata["transparentBelowMeanAbsoluteRgbDelta"], 1.0)
 
     def test_alternative_segmentation_strategies_are_deterministic_and_reported(self):
         with tempfile.TemporaryDirectory() as directory:

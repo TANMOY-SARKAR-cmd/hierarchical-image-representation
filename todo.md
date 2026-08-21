@@ -117,3 +117,8 @@
 - [x] Separate the persistent original-input and reconstructed-output panels from the optional swipe comparison card.
 - [x] Add a controllable server-generated absolute-error heatmap overlay, opacity control, legend, and unavailable state to the reconstruction panel.
 - [x] Add separated-view and heatmap artifact-routing regressions; validate, checkpoint, synchronize, and deliver the enhanced inspection workflow.
+- [x] Generate fixed-calibration transparent RGBA absolute-error heatmaps for every selectable reconstruction and preserve legacy residual-error compatibility.
+- [x] Expose owner-scoped per-reconstruction heatmap URLs and calibration metadata through the analysis artifact contract.
+- [x] Ensure heatmap controls never mutate reconstruction selection and only overlay the active reconstruction’s paired error artifact.
+- [x] Retire ambiguous source-panel final-error selection, clarify distinct inspection views, and add mode-routing, calibration, and no-mode-mutation regressions.
+- [x] Validate, checkpoint, synchronize, and deliver the corrected mode-aligned heatmap workflow.
