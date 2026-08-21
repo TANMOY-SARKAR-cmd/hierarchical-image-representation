@@ -72,6 +72,22 @@ export type AnalysisResult = {
   artifactUrls: AnalysisArtifactUrls;
 };
 
+export type AnalysisJobStatus = {
+  jobId: string;
+  ownerId: string;
+  status: "queued" | "running" | "uploading" | "completed" | "failed";
+  stage: string;
+  percent: number;
+  message: string;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+  error: string | null;
+  resultAvailable: boolean;
+};
+
+type AnalysisProgressEvent = Pick<AnalysisJobStatus, "status" | "stage" | "percent" | "message">;
+
 export type CacheRetentionTelemetry = {
   scope: "process_local_aggregate";
   activeEntries: number;
@@ -200,10 +216,58 @@ export class AnalysisResultCache {
   }
 }
 
+export class AnalysisJobStore {
+  private readonly jobs = new Map<string, AnalysisJobStatus>();
+
+  constructor(private readonly ttlMs: number) {}
+
+  create(jobId: string, ownerId: string, now = Date.now()) {
+    this.purge(now);
+    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, error: null, resultAvailable: false };
+    this.jobs.set(jobId, job);
+    return job;
+  }
+
+  update(jobId: string, update: AnalysisProgressEvent, now = Date.now()) {
+    const job = this.jobs.get(jobId);
+    if (!job || job.status === "completed" || job.status === "failed") return null;
+    const next = { ...job, ...update, percent: Math.max(job.percent, Math.min(99, Math.round(update.percent))), updatedAt: now };
+    this.jobs.set(jobId, next);
+    return next;
+  }
+
+  complete(jobId: string, now = Date.now()) {
+    const job = this.jobs.get(jobId);
+    if (!job) return null;
+    const next = { ...job, status: "completed" as const, stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, error: null, resultAvailable: true };
+    this.jobs.set(jobId, next);
+    return next;
+  }
+
+  fail(jobId: string, error: string, now = Date.now()) {
+    const job = this.jobs.get(jobId);
+    if (!job) return null;
+    const next = { ...job, status: "failed" as const, stage: "failed", message: "Analysis did not complete.", updatedAt: now, completedAt: now, error, resultAvailable: false };
+    this.jobs.set(jobId, next);
+    return next;
+  }
+
+  get(jobId: string, now = Date.now()) {
+    this.purge(now);
+    return this.jobs.get(jobId) ?? null;
+  }
+
+  private purge(now: number) {
+    for (const [jobId, job] of Array.from(this.jobs.entries())) if (job.completedAt !== null && now - job.completedAt >= this.ttlMs) this.jobs.delete(jobId);
+  }
+}
+
 const activeResults = new AnalysisResultCache(
   positiveInteger(process.env.ANALYSIS_RESULT_TTL_MS, DEFAULT_RESULT_TTL_MS),
   positiveInteger(process.env.ANALYSIS_RESULT_CACHE_CAPACITY, DEFAULT_RESULT_CACHE_CAPACITY)
 );
+
+const activeJobs = new AnalysisJobStore(positiveInteger(process.env.ANALYSIS_RESULT_TTL_MS, DEFAULT_RESULT_TTL_MS));
 
 const submissionAdmission = new AnalysisSubmissionAdmission(
   positiveInteger(process.env.ANALYSIS_SUBMISSION_WINDOW_MS, DEFAULT_SUBMISSION_WINDOW_MS),
@@ -236,7 +300,7 @@ export function validateImageSignature(data: Buffer, mimeType: string, extension
   if (mimeType !== expectedMime || !signatureMatches) throw new Error("The uploaded image filename, MIME type, and binary signature must agree.");
 }
 
-function runPython(inputPath: string, outputPath: string, config: AnalysisConfig) {
+function runPython(inputPath: string, outputPath: string, config: AnalysisConfig, onProgress?: (event: AnalysisProgressEvent) => void) {
   const scriptPath = path.join(process.cwd(), "python_engine", "representation_engine.py");
   const python = process.env.PYTHON_EXECUTABLE ?? "python3";
   return new Promise<void>((resolve, reject) => {
@@ -245,13 +309,26 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
+    let stdoutBuffer = "";
     let stderr = "";
     const timeout = setTimeout(() => {
       processHandle.kill("SIGKILL");
       reject(new Error("Image analysis exceeded the 120-second processing limit."));
     }, 120_000);
     processHandle.stdout.on("data", chunk => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      stdoutBuffer += text;
+      const lines = stdoutBuffer.split("\n");
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        try {
+          const event = JSON.parse(line) as { event?: string; stage?: string; percent?: number; message?: string };
+          if (event.event === "progress" && typeof event.stage === "string" && typeof event.percent === "number" && typeof event.message === "string") onProgress?.({ status: "running", stage: event.stage, percent: event.percent, message: event.message });
+        } catch {
+          // The final completion record is parsed after process closure; unrelated diagnostic output is not progress.
+        }
+      }
     });
     processHandle.stderr.on("data", chunk => {
       stderr += chunk.toString();
@@ -289,7 +366,8 @@ export async function analyzeImage(input: {
   mimeType: string;
   dataBase64: string;
   config: AnalysisConfig;
-}, ownerId = "direct", admissionKey = `direct:${ownerId}`): Promise<AnalysisResult> {
+}, ownerId = "direct", admissionKey = `direct:${ownerId}`, run?: { jobId?: string; onProgress?: (event: AnalysisProgressEvent) => void }): Promise<AnalysisResult> {
+  run?.onProgress?.({ status: "running", stage: "validating_input", percent: 1, message: "Validating the uploaded image and configured limits." });
   if (!supportedMimeTypes.has(input.mimeType)) {
     throw new Error("Supported image formats are PNG, JPEG, and WebP.");
   }
@@ -304,15 +382,16 @@ export async function analyzeImage(input: {
 
   submissionAdmission.acquire(admissionKey);
   try {
-    const jobId = nanoid(14);
+    const jobId = run?.jobId ?? nanoid(14);
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "hierarchy-analysis-"));
     const inputPath = path.join(workspace, `source.${extension}`);
     const outputPath = path.join(workspace, "output");
     try {
       await fs.mkdir(outputPath, { recursive: true });
       await fs.writeFile(inputPath, data);
-      await runPython(inputPath, outputPath, input.config);
+      await runPython(inputPath, outputPath, input.config, run?.onProgress);
       const representation = JSON.parse(await fs.readFile(path.join(outputPath, "representation.json"), "utf8")) as Record<string, unknown>;
+    run?.onProgress?.({ status: "uploading", stage: "uploading_artifacts", percent: 97, message: "Uploading private analysis artifacts for the completed run." });
     const overlayUrls = {
       brightness: await uploadArtifact(jobId, outputPath, "overlays/brightness.png", "image/png"),
       edgeStrength: await uploadArtifact(jobId, outputPath, "overlays/edge-strength.png", "image/png"),
@@ -354,6 +433,7 @@ export async function analyzeImage(input: {
     };
       const result = { jobId, ownerId, representation, artifactUrls };
       activeResults.remember(result);
+      run?.onProgress?.({ status: "uploading", stage: "finalizing", percent: 99, message: "Finalizing owner-scoped analysis results." });
       return result;
     } finally {
       await fs.rm(workspace, { recursive: true, force: true });
@@ -365,6 +445,19 @@ export async function analyzeImage(input: {
 
 export function getAnalysisResult(jobId: string) {
   return activeResults.get(jobId);
+}
+
+export function startAnalysisJob(input: { fileName: string; mimeType: string; dataBase64: string; config: AnalysisConfig }, ownerId: string, admissionKey: string) {
+  const jobId = nanoid(14);
+  const job = activeJobs.create(jobId, ownerId);
+  void analyzeImage(input, ownerId, admissionKey, { jobId, onProgress: update => activeJobs.update(jobId, update) })
+    .then(() => activeJobs.complete(jobId))
+    .catch(error => activeJobs.fail(jobId, error instanceof Error ? error.message : "Image analysis could not be completed."));
+  return job;
+}
+
+export function getAnalysisJob(jobId: string) {
+  return activeJobs.get(jobId);
 }
 
 export function getAnalysisCacheTelemetry() {

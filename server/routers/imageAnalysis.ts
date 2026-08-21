@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
+import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, startAnalysisJob } from "../imageAnalysis";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 
 const analysisConfig = z.object({
@@ -62,16 +62,16 @@ function admissionKey(ctx: { user: { id: string | number } | null; req?: { heade
   return `client:${address.slice(0, 128)}`;
 }
 
+const analysisInput = z.object({
+  fileName: z.string().min(1).max(160),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+  dataBase64: z.string().min(1),
+  config: analysisConfig,
+});
+
 export const imageAnalysisRouter = router({
   process: protectedProcedure
-    .input(
-      z.object({
-        fileName: z.string().min(1).max(160),
-        mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
-        dataBase64: z.string().min(1),
-        config: analysisConfig,
-      })
-    )
+    .input(analysisInput)
     .mutation(async ({ input, ctx }) => {
       try {
         return await analyzeImage(input, String(ctx.user.id), admissionKey(ctx));
@@ -83,6 +83,19 @@ export const imageAnalysisRouter = router({
         });
       }
     }),
+  start: protectedProcedure.input(analysisInput).mutation(({ input, ctx }) => {
+    try {
+      return startAnalysisJob(input, String(ctx.user.id), admissionKey(ctx));
+    } catch (error) {
+      if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
+      throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Image analysis could not be started." });
+    }
+  }),
+  status: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input, ctx }) => {
+    const job = getAnalysisJob(input.jobId);
+    if (!job || job.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis job is not available to the current user." });
+    return job;
+  }),
   result: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(({ input, ctx }) => {
     const result = getAnalysisResult(input.jobId);
     if (!result || result.ownerId !== String(ctx.user.id)) {

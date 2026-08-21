@@ -3,7 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const processMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
+const startMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
+const jobStatusQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
+const resultQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const telemetryQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const authState = vi.hoisted(() => ({ user: null as { role: string } | null }));
 const startLogin = vi.hoisted(() => vi.fn());
@@ -11,7 +13,9 @@ const startLogin = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     imageAnalysis: {
-      process: { useMutation: () => processMutation },
+      start: { useMutation: () => startMutation },
+      status: { useQuery: (input: { jobId: string }) => input.jobId === "job-1" ? jobStatusQuery : { data: undefined, isLoading: false } },
+      result: { useQuery: (input: { jobId: string }) => input.jobId === "job-1" ? resultQuery : { data: undefined, isLoading: false } },
       cacheTelemetry: { useQuery: () => telemetryQuery },
     },
   },
@@ -44,7 +48,9 @@ describe("Hierarchy workbench UI", () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
-    processMutation.mutateAsync.mockReset();
+    startMutation.mutateAsync.mockReset();
+    jobStatusQuery.data = undefined;
+    resultQuery.data = undefined;
     startLogin.mockReset();
     telemetryQuery.data = undefined;
     telemetryQuery.isLoading = false;
@@ -93,11 +99,26 @@ describe("Hierarchy workbench UI", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it("shows the truthful server-reported analysis stage and percentage while a job is active", async () => {
+    authState.user = { role: "user" };
+    startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
+    jobStatusQuery.data = { jobId: "job-1", status: "running", stage: "segmentation", percent: 38, message: "Built deterministic micro-regions across the requested image scales.", createdAt: Date.now() - 4_000, updatedAt: Date.now(), completedAt: null, error: null, resultAvailable: false };
+    const view = render(<Home />);
+    fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
+    fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
+    const progress = await view.findByRole("progressbar", { name: "Analysis progress" });
+    expect(progress).toHaveAttribute("aria-valuenow", "38");
+    expect(view.getByRole("heading", { name: "segmentation" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: /segmentation/i })).toBeDisabled();
+  });
+
   it("renders duplicate-endpoint relationships without a React duplicate-key warning", async () => {
     const first = { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent"], primaryType: "adjacent", adjacent: true };
     const second = { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent"], primaryType: "adjacent", adjacent: true };
     authState.user = { role: "user" };
-    processMutation.mutateAsync.mockResolvedValue({ ...completedResult, representation: { ...completedResult.representation, relationships: [first, second] } });
+    startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
+    jobStatusQuery.data = { jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: Date.now() - 1_000, updatedAt: Date.now(), completedAt: Date.now(), error: null, resultAvailable: true };
+    resultQuery.data = { ...completedResult, jobId: "job-1", representation: { ...completedResult.representation, relationships: [first, second] } };
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const view = render(<Home />);
@@ -130,7 +151,9 @@ describe("Hierarchy workbench UI", () => {
 
   it("applies interactive edge controls and resets the filtered graph", async () => {
     authState.user = { role: "user" };
-    processMutation.mutateAsync.mockResolvedValue(completedResult);
+    startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
+    jobStatusQuery.data = { jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: Date.now() - 1_000, updatedAt: Date.now(), completedAt: Date.now(), error: null, resultAvailable: true };
+    resultQuery.data = { ...completedResult, jobId: "job-1", representation: { ...completedResult.representation, reconstruction_metadata: { ...completedResult.representation.reconstruction_metadata, residual: { coverage: 0.34, actualEncodedBytes: 196_608, quantizationStep: 4, artifactEmitted: true } } } };
     const view = render(<Home />);
     fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
     fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
@@ -146,8 +169,15 @@ describe("Hierarchy workbench UI", () => {
     expect(view.getByText("Segmentation diagnostics")).toBeInTheDocument();
     expect(view.getByText("72 regions")).toBeInTheDocument();
     expect(view.getByRole("link", { name: /download residual npz/i })).toHaveAttribute("href", "/residuals.npz");
+    await waitFor(() => expect(view.getByAltText("Hierarchically reconstructed image")).toHaveAttribute("src", "/constant.png"));
+    expect(view.getByText(/constant evidence/i)).toBeInTheDocument();
     fireEvent.click(view.getByRole("button", { name: "MODEL" }));
     expect(view.getByText("PARAMETRIC")).toBeInTheDocument();
+    expect(view.getByAltText("Hierarchically reconstructed image")).toHaveAttribute("src", "/parametric.png");
+    expect(view.getByText(/parametric evidence/i)).toBeInTheDocument();
+    fireEvent.click(view.getByRole("button", { name: "DETAIL" }));
+    expect(view.getByAltText("Hierarchically reconstructed image")).toHaveAttribute("src", "/residual.png");
+    expect(view.getByText(/coverage 34.0%/i)).toBeInTheDocument();
 
     fireEvent.click(view.getByRole("button", { name: "similar color" }));
     expect(view.getByText("1/2")).toBeInTheDocument();

@@ -95,6 +95,7 @@ type Representation = {
   parameterSensitivity?: { schema: string; design: string; interpretation: string; records: Array<{ label: string; entityCountByType: Record<string, number>; relationshipCount: number; quality: { psnr: number; ssim: number; processingTimeMs: number }; artifactStorageBytes: number }> } | null;
 };
 type CacheRetentionTelemetry = { scope: "process_local_aggregate"; activeEntries: number; capacity: number; ttlMs: number; fillRatio: number; writes: number; lookups: number; hits: number; misses: number; hitRate: number; expiredEvictions: number; capacityEvictions: number; totalEvictions: number; processStartedAt: number; lastActivityAt: number | null };
+type AnalysisJobStatus = { jobId: string; status: "queued" | "running" | "uploading" | "completed" | "failed"; stage: string; percent: number; message: string; createdAt: number; updatedAt: number; completedAt: number | null; error: string | null; resultAvailable: boolean };
 
 const overlays = [
   { id: "none", label: "Native source" },
@@ -129,6 +130,17 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function AnalysisProgressPanel({ job }: { job: AnalysisJobStatus | null | undefined }) {
+  if (!job) return null;
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - job.createdAt) / 1000));
+  const terminal = job.status === "completed" || job.status === "failed";
+  return <section className={cn("rounded-xl border p-4", job.status === "failed" ? "border-rose-300/30 bg-rose-300/[0.04]" : "border-cyan-300/25 bg-cyan-300/[0.045]")} aria-live="polite">
+    <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-200">{terminal ? "Analysis status" : "Server-side analysis"}</p><h2 className="mt-1 text-sm font-semibold text-slate-100">{job.stage.replace(/_/g, " ")}</h2></div><span className="font-mono text-lg font-semibold text-cyan-100">{job.percent}%</span></div>
+    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-950/80" role="progressbar" aria-label="Analysis progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={job.percent}><div className={cn("h-full rounded-full transition-[width] duration-300", job.status === "failed" ? "bg-rose-300" : "bg-cyan-300")} style={{ width: `${job.percent}%` }} /></div>
+    <p className="mt-3 text-xs leading-relaxed text-slate-300">{job.error ?? job.message}</p><p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-slate-500">{elapsedSeconds}s elapsed · {job.status}</p>
+  </section>;
 }
 
 function getDataBase64(file: File) {
@@ -281,7 +293,17 @@ export default function Home() {
   const [minimumConfidence, setMinimumConfidence] = useState(0);
   const [maximumNormalizedDistance, setMaximumNormalizedDistance] = useState(1);
   const [activeHierarchyCut, setActiveHierarchyCut] = useState<"full" | "region" | "composite" | "entity">("full");
-  const processMutation = trpc.imageAnalysis.process.useMutation();
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [appliedResultJobId, setAppliedResultJobId] = useState<string | null>(null);
+  const [reportedFailureJobId, setReportedFailureJobId] = useState<string | null>(null);
+  const startMutation = trpc.imageAnalysis.start.useMutation();
+  const statusQuery = trpc.imageAnalysis.status.useQuery({ jobId: activeJobId ?? "pending-job" }, { enabled: Boolean(activeJobId), refetchInterval: query => {
+    const status = query.state.data as AnalysisJobStatus | undefined;
+    return status?.status === "completed" || status?.status === "failed" ? false : 850;
+  }, refetchOnWindowFocus: false, retry: false });
+  const jobStatus = statusQuery.data as AnalysisJobStatus | undefined;
+  const resultQuery = trpc.imageAnalysis.result.useQuery({ jobId: activeJobId ?? "pending-job" }, { enabled: Boolean(activeJobId && jobStatus?.resultAvailable), refetchOnWindowFocus: false, retry: false });
+  const isAnalyzing = startMutation.isPending || Boolean(jobStatus && jobStatus.status !== "completed" && jobStatus.status !== "failed");
   const telemetryQuery = trpc.imageAnalysis.cacheTelemetry.useQuery(undefined, { enabled: isAdmin, refetchInterval: isAdmin ? 15_000 : false, refetchOnWindowFocus: false });
 
   const entities = useMemo(() => new Map((representation?.entities ?? []).map(entity => [entity.id, entity])), [representation]);
@@ -296,6 +318,8 @@ export default function Home() {
   const relationshipOverlayActive = selectedOverlay === "relationshipGraph" || selectedOverlay === "normalizedDistanceGraph";
   const overlayUrl = selectedOverlay === "none" || relationshipOverlayActive ? null : selectedOverlay === "absolutePixelError" ? artifacts?.errors.absolutePixelError ?? null : selectedOverlay === "parametricError" ? artifacts?.errors.parametricError ?? null : selectedOverlay === "perRegionError" ? artifacts?.errors.perRegionError ?? null : selectedOverlay === "residualEnergy" ? artifacts?.errors.residualEnergy ?? null : artifacts?.overlays[selectedOverlay] ?? null;
   const reconstructionUrl = artifacts?.reconstructions[reconstructionLevel] ?? artifacts?.reconstructedPng ?? null;
+  const selectedReconstructionOutput = representation?.reconstruction_metadata.outputs[reconstructionLevel];
+  const residualMetadata = representation?.reconstruction_metadata.residual;
   const parentChain = useMemo(() => {
     const chain: Entity[] = [];
     let current = selectedEntity?.parentId ? entities.get(selectedEntity.parentId) ?? null : null;
@@ -307,6 +331,29 @@ export default function Home() {
   useEffect(() => () => {
     if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
   }, []);
+
+  useEffect(() => {
+    const result = resultQuery.data;
+    if (!result || result.jobId === appliedResultJobId) return;
+    const parsed = result.representation as unknown as Representation;
+    setRepresentation(parsed);
+    setArtifacts(result.artifactUrls);
+    setSelectedId(parsed.entities.find(entity => entity.type === "micro_region")?.id ?? parsed.hierarchy.rootId);
+    setSelectedRelationshipTypes([]);
+    setAdjacentOnly(false);
+    setMinimumConfidence(0);
+    setMaximumNormalizedDistance(1);
+    setActiveHierarchyCut("full");
+    setReconstructionLevel("constant");
+    setAppliedResultJobId(result.jobId);
+    toast.success("Graph-driven relational entity analysis completed.");
+  }, [appliedResultJobId, resultQuery.data]);
+
+  useEffect(() => {
+    if (jobStatus?.status !== "failed" || jobStatus.jobId === reportedFailureJobId) return;
+    toast.error(jobStatus.error ?? "The analysis could not be completed.");
+    setReportedFailureJobId(jobStatus.jobId);
+  }, [jobStatus, reportedFailureJobId]);
 
   function changeFile(event: ChangeEvent<HTMLInputElement>) {
     const incoming = event.target.files?.[0] ?? null;
@@ -328,6 +375,9 @@ export default function Home() {
     setMinimumConfidence(0);
     setMaximumNormalizedDistance(1);
     setActiveHierarchyCut("full");
+    setActiveJobId(null);
+    setAppliedResultJobId(null);
+    setReportedFailureJobId(null);
     if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
     const nextSourceUrl = URL.createObjectURL(incoming);
     sourceUrlRef.current = nextSourceUrl;
@@ -349,7 +399,7 @@ export default function Home() {
       return;
     }
     try {
-      const result = await processMutation.mutateAsync({
+      const job = await startMutation.mutateAsync({
         fileName: file.name,
         mimeType: file.type as "image/png" | "image/jpeg" | "image/webp",
         dataBase64: await getDataBase64(file),
@@ -391,16 +441,10 @@ export default function Home() {
           sensitivityVariantLimit: 5,
         },
       });
-      const parsed = result.representation as unknown as Representation;
-      setRepresentation(parsed);
-      setArtifacts(result.artifactUrls);
-      setSelectedId(parsed.entities.find(entity => entity.type === "micro_region")?.id ?? parsed.hierarchy.rootId);
-      setSelectedRelationshipTypes([]);
-      setAdjacentOnly(false);
-      setMinimumConfidence(0);
-      setMaximumNormalizedDistance(1);
-      setActiveHierarchyCut("full");
-      toast.success("Graph-driven relational entity analysis completed.");
+      setActiveJobId(job.jobId);
+      setAppliedResultJobId(null);
+      setReportedFailureJobId(null);
+      setReconstructionLevel("constant");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The analysis could not be completed.");
     }
@@ -468,11 +512,13 @@ export default function Home() {
               <div><Label className="mb-2 block text-xs text-slate-300">Reconstruction profile</Label><div className="grid grid-cols-3 gap-1">{(["fast", "balanced", "accurate"] as const).map(profile => <Button key={profile} type="button" variant="outline" size="sm" onClick={() => setReconstructionProfile(profile)} className={cn("h-7 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", reconstructionProfile === profile && "border-emerald-300/45 bg-emerald-300/10 text-emerald-100")}>{profile.toUpperCase()}</Button>)}</div></div>
               <div><div className="mb-2 flex items-center justify-between"><Label className="text-xs text-slate-300">Residual detail</Label><Button type="button" variant="outline" size="sm" onClick={() => setResidualEnabled(value => !value)} className={cn("h-6 border-white/10 bg-black/20 px-2 font-mono text-[9px]", residualEnabled ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : "text-slate-500")}>{residualEnabled ? "ON" : "OFF"}</Button></div><div className={cn(!residualEnabled && "opacity-40")}><div className="mb-1 flex justify-between font-mono text-[9px] text-slate-500"><span>Residual budget</span><span>{residualBudgetKb} KB</span></div><Slider value={[residualBudgetKb]} onValueChange={value => setResidualBudgetKb(value[0] ?? 192)} min={0} max={512} step={16} disabled={!residualEnabled} /></div></div>
               <div><div className="mb-1 flex items-center justify-between"><Label className="text-xs text-slate-300">Sensitivity evidence</Label><Button type="button" variant="outline" size="sm" onClick={() => setRunParameterSensitivity(value => !value)} className={cn("h-6 border-white/10 bg-black/20 px-2 font-mono text-[9px]", runParameterSensitivity ? "border-violet-300/40 bg-violet-300/10 text-violet-100" : "text-slate-500")}>{runParameterSensitivity ? "5 VARIANTS" : "OFF"}</Button></div><p className="text-[10px] leading-relaxed text-slate-500">Runs a bounded server-side parameter sweep for internal dependence evidence, not semantic invariance.</p></div>
-              <Button className="h-10 w-full bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={runAnalysis} disabled={!file || processMutation.isPending}>
-                {processMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Building hierarchy…</> : <><Sparkles className="mr-2 h-4 w-4" /> Run analysis</>}
+              <Button className="h-10 w-full bg-cyan-300 text-slate-950 hover:bg-cyan-200" onClick={runAnalysis} disabled={!file || isAnalyzing}>
+                {isAnalyzing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {jobStatus?.stage.replace(/_/g, " ") ?? "Starting analysis…"}</> : <><Sparkles className="mr-2 h-4 w-4" /> Run analysis</>}
               </Button>
             </div>
           </section>
+
+          <AnalysisProgressPanel job={jobStatus} />
 
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Layers3 className="h-4 w-4 text-cyan-300" /> Feature overlay</div>
@@ -480,7 +526,7 @@ export default function Home() {
               {overlays.map(overlay => <button type="button" key={overlay.id} onClick={() => setSelectedOverlay(overlay.id)} disabled={overlay.id !== "none" && !artifacts} className={cn("flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs transition-colors", selectedOverlay === overlay.id ? "bg-cyan-300/10 text-cyan-100" : "text-slate-400 hover:bg-white/5 hover:text-slate-200", !artifacts && overlay.id !== "none" && "cursor-not-allowed opacity-40")}><span>{overlay.label}</span>{selectedOverlay === overlay.id ? <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" /> : null}</button>)}
             </div>
           </section>
-          <section className="rounded-xl border border-emerald-200/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Sparkles className="h-4 w-4 text-emerald-300" /> Advanced outputs</div><div className="grid grid-cols-3 gap-1.5">{(["constant", "parametric", "residual"] as const).map(mode => <Button key={mode} type="button" variant="outline" size="sm" disabled={!artifacts} onClick={() => setReconstructionLevel(mode)} className={cn("h-8 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", reconstructionLevel === mode && "border-emerald-300/45 bg-emerald-300/10 text-emerald-100")}>{mode === "constant" ? "BASE" : mode === "parametric" ? "MODEL" : "DETAIL"}</Button>)}</div><p className="mt-2 text-[11px] leading-relaxed text-slate-500">Compare flat region colour, local Lab models, and the bounded residual reconstruction.</p>{artifacts?.residualsNpz ? <a href={artifacts.residualsNpz} className="mt-3 flex items-center gap-2 rounded border border-emerald-300/15 bg-emerald-300/[0.04] px-2 py-2 font-mono text-[10px] text-emerald-100 hover:bg-emerald-300/[0.09]"><FileArchive className="h-3.5 w-3.5" /> Download residual NPZ <Download className="ml-auto h-3 w-3" /></a> : null}</section>
+          <section className="rounded-xl border border-emerald-200/10 bg-slate-900/80 p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Sparkles className="h-4 w-4 text-emerald-300" /> Advanced outputs</div><div className="grid grid-cols-3 gap-1.5">{(["constant", "parametric", "residual"] as const).map(mode => <Button key={mode} type="button" variant="outline" size="sm" disabled={!artifacts} onClick={() => setReconstructionLevel(mode)} className={cn("h-8 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", reconstructionLevel === mode && "border-emerald-300/45 bg-emerald-300/10 text-emerald-100")}>{mode === "constant" ? "BASE" : mode === "parametric" ? "MODEL" : "DETAIL"}</Button>)}</div><p className="mt-2 text-[11px] leading-relaxed text-slate-500">New analyses open on BASE so structural decoding is visible first. DETAIL adds a budgeted residual correction and may intentionally resemble the source.</p>{selectedReconstructionOutput ? <div className="mt-3 rounded border border-white/8 bg-black/20 p-2 font-mono text-[9px]"><p className="uppercase tracking-wider text-emerald-200">{reconstructionLevel} evidence</p><p className="mt-1 text-slate-300">PSNR {Number(selectedReconstructionOutput.psnr ?? 0).toFixed(2)} dB · SSIM {Number(selectedReconstructionOutput.ssim ?? 0).toFixed(4)} · MSE {Number(selectedReconstructionOutput.mse ?? 0).toFixed(2)}</p>{reconstructionLevel === "residual" && residualMetadata ? <p className="mt-1 text-slate-500">coverage {(residualMetadata.coverage * 100).toFixed(1)}% · {formatBytes(residualMetadata.actualEncodedBytes ?? 0)} residual payload</p> : null}</div> : null}{artifacts?.residualsNpz ? <a href={artifacts.residualsNpz} className="mt-3 flex items-center gap-2 rounded border border-emerald-300/15 bg-emerald-300/[0.04] px-2 py-2 font-mono text-[10px] text-emerald-100 hover:bg-emerald-300/[0.09]"><FileArchive className="h-3.5 w-3.5" /> Download residual NPZ <Download className="ml-auto h-3 w-3" /></a> : null}</section>
           <GraphEdgeFilterPanel representation={representation} relationshipTypes={relationshipTypes} filteredCount={filteredRelationships.length} selectedTypes={selectedRelationshipTypes} setSelectedTypes={setSelectedRelationshipTypes} adjacentOnly={adjacentOnly} setAdjacentOnly={setAdjacentOnly} minimumConfidence={minimumConfidence} setMinimumConfidence={setMinimumConfidence} maximumNormalizedDistance={maximumNormalizedDistance} setMaximumNormalizedDistance={setMaximumNormalizedDistance} />
         </aside>
 

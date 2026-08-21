@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnalysisResultCache, type AnalysisResult } from "./imageAnalysis";
+import { AnalysisJobStore, AnalysisResultCache, type AnalysisResult } from "./imageAnalysis";
 
 function result(jobId: string): AnalysisResult {
   return { jobId, representation: {}, artifactUrls: { representationJson: "", featuresNpz: "", reconstructedPng: "", svg: "", overlays: {}, reconstructions: {}, errors: {} } };
@@ -58,5 +58,18 @@ describe("AnalysisResultCache", () => {
     cache.remember(result("expiring"), 2_000);
     const telemetry = cache.telemetry(2_100);
     expect(telemetry).toMatchObject({ activeEntries: 0, lookups: 0, hitRate: 0, expiredEvictions: 1, totalEvictions: 1 });
+  });
+});
+
+describe("AnalysisJobStore", () => {
+  it("keeps progress monotonic, marks completed results available, and expires terminal jobs", () => {
+    const jobs = new AnalysisJobStore(100);
+    jobs.create("job-progress", "owner-1", 1_000);
+    jobs.update("job-progress", { status: "running", stage: "segmentation", percent: 38, message: "Segmenting." }, 1_010);
+    jobs.update("job-progress", { status: "running", stage: "merge_tree", percent: 22, message: "Merging." }, 1_020);
+    expect(jobs.get("job-progress", 1_021)).toMatchObject({ ownerId: "owner-1", stage: "merge_tree", percent: 38, resultAvailable: false });
+    jobs.complete("job-progress", 1_030);
+    expect(jobs.get("job-progress", 1_031)).toMatchObject({ status: "completed", percent: 100, resultAvailable: true, error: null });
+    expect(jobs.get("job-progress", 1_130)).toBeNull();
   });
 });

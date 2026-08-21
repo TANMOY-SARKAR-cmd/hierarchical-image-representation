@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -89,8 +89,13 @@ def validate_representation(entities: List[Dict[str, Any]], masks: Dict[str, np.
     return {"connectivityScore": rounded(connected / max(len(non_root), 1), 8), "leafCoverage": rounded(float(leaf_union.mean()), 8), "parentAreaConservationError": rounded(float(np.mean(area_errors)) if area_errors else 0.0, 8), "hierarchyCycleCount": cycles, "duplicatePixelStorage": False, "valid": connected == len(non_root) and cycles == 0 and bool(leaf_union.all())}
 
 
-def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> Dict[str, Any]:
+def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any], progress: Optional[Callable[[str, int, str], None]] = None) -> Dict[str, Any]:
+    def report(stage: str, percent: int, message: str) -> None:
+        if progress is not None:
+            progress(stage, percent, message)
+
     started = time.perf_counter(); profile: Dict[str, float] = {}; config = resolved_config(raw_config); output_dir.mkdir(parents=True, exist_ok=True)
+    report("validating_input", 4, "Validating image limits and preparing the analysis workspace.")
     with Image.open(input_path) as probe:
         if probe.width * probe.height > int(config["maxImagePixels"]):
             raise ValueError(f"The image exceeds the configured {config['maxImagePixels']:,}-pixel analysis ceiling.")
@@ -98,6 +103,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     overlays_dir, recon_dir, error_dir = output_dir / "overlays", output_dir / "reconstructions", output_dir / "errors"
     for directory in (overlays_dir, recon_dir, error_dir): directory.mkdir(exist_ok=True)
     feature_started = time.perf_counter(); base_tensor, base_fields = extract_features(rgb, config); profile["featureExtractionMs"] = rounded((time.perf_counter() - feature_started) * 1000, 3)
+    report("feature_extraction", 18, "Extracted explicit CIELAB, gradient, and local-structure features.")
     for key, output_name, colormap in (("lightness", "brightness", cv2.COLORMAP_VIRIDIS), ("edge_strength", "edge-strength", cv2.COLORMAP_INFERNO), ("gradient_x", "gradient-x", cv2.COLORMAP_COOL), ("gradient_y", "gradient-y", cv2.COLORMAP_COOL), ("complexity", "complexity", cv2.COLORMAP_TURBO)):
         write_overlay(base_fields[key], overlays_dir / f"{output_name}.png", colormap)
 
@@ -120,6 +126,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
         reconstruction = reconstruct_entities(entities, masks, resize_image(rgb, factor).shape)
         scales.append({"resolutionFactor": factor, "scaleFactor": factor, "resolutionName": {1: "native", 2: "half", 4: "quarter", 8: "eighth"}.get(factor, f"1/{factor}"), "width": int(labels.shape[1]), "height": int(labels.shape[0]), "featureShape": list(tensor.shape), "entityIds": [entity["id"] for entity in entities], "entityCount": len(entities), "segmentationCharacteristics": {"strategy": config.get("segmentationStrategy", "slic"), "requestedSegments": max(8, int(config["slicSegments"] / (factor * factor))), "actualSegments": int(labels.max()), "meanComplexity": rounded(fields["complexity"].mean(), 8)}, "reconstructionError": metrics_for(resize_image(rgb, factor), reconstruction), "crossScaleLinks": []})
     profile["segmentationMs"] = rounded((time.perf_counter() - segmentation_started) * 1000, 3)
+    report("segmentation", 38, "Built deterministic micro-regions across the requested image scales.")
     _, _, base_labels, micro_regions, masks, label_by_id = scale_data[1]
     base_adjacency, shared_boundaries = graph_edges_for_labels(label_by_id, base_labels)
 
@@ -143,6 +150,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
             scale_by_factor[1]["crossScaleLinks"].extend(links); scale_by_factor[1].setdefault("crossScaleOverlapLinks", []).extend(overlap_links)
             cross_scale.extend(links); cross_scale_overlaps.extend(overlap_links)
         profile["crossScaleCorrespondenceMs"] = rounded((time.perf_counter() - correspondence_started) * 1000, 3)
+    report("cross_scale", 50, "Recorded cross-scale correspondence and overlap evidence.")
 
     hierarchy_started = time.perf_counter()
     merge_nodes, tree_roots, merge_evidence = build_global_merge_tree(micro_regions, masks, rgb, base_fields, config)
@@ -158,6 +166,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     masks[root["id"]] = root_mask; all_entities = [*micro_regions, *merge_nodes, root]
     hierarchy_cuts = {name: {"targetNodeCount": cut_targets[name], "nodeIds": [entity["id"] for entity in cut], "policy": "largest_leaf_count_expansion_from_tree_roots"} for name, cut in (("region", regions), ("composite", composites), ("entity", entities_level))}
     profile["graphAgglomerationMs"] = rounded((time.perf_counter() - hierarchy_started) * 1000, 3)
+    report("merge_tree", 65, "Constructed the deterministic global energy merge tree and derived cuts.")
 
     relationship_started = time.perf_counter(); relationships = build_relationships(micro_regions, masks, base_adjacency, (height, width), config, shared_boundaries)
     for level_entities in (regions, composites, entities_level):
@@ -168,6 +177,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     relationships.extend(cross_scale); relationships.extend(cross_scale_overlaps); profile["relationshipConstructionMs"] = rounded((time.perf_counter() - relationship_started) * 1000, 3)
     write_relationship_overlay(rgb, micro_regions, [edge for edge in relationships if edge.get("entityLevel") == 1], overlays_dir / "relationship-graph.png")
     write_relationship_overlay(rgb, micro_regions, [edge for edge in relationships if edge.get("entityLevel") == 1], overlays_dir / "normalized-distance-graph.png", True)
+    report("relationship_graph", 74, "Built sparse relationship graphs and hierarchy evidence.")
 
     reconstruction_started = time.perf_counter(); reconstruction_groups = {"level1": micro_regions, "level2": regions, "level3": composites, "level4": entities_level, "full": micro_regions}; reconstruction_metadata: Dict[str, Any] = {}
     full_reconstruction = None
@@ -197,6 +207,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
     residual_energy = np.abs(quantized_residual.astype(np.float32)).mean(axis=2)
     write_overlay(absolute_error, error_dir / "absolute-error.png", cv2.COLORMAP_INFERNO); write_overlay(parametric_error, error_dir / "parametric-error.png", cv2.COLORMAP_INFERNO); write_overlay(per_region_error, error_dir / "per-region-error.png", cv2.COLORMAP_MAGMA); write_overlay(residual_energy, error_dir / "residual-energy.png", cv2.COLORMAP_TURBO); create_svg(base_labels, rgb, output_dir / "reconstruction.svg")
     profile["reconstructionMs"] = rounded((time.perf_counter() - reconstruction_started) * 1000, 3)
+    report("reconstruction", 88, "Rendered structural, adaptive, and residual reconstruction artifacts.")
     sensitivity_report = run_parameter_sensitivity(input_path, output_dir, config, analyze) if config.get("runParameterSensitivity", False) else None
 
     validity = validate_representation(all_entities, masks, root["id"])
@@ -229,6 +240,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
         "reconstruction_metadata": {"outputs": reconstruction_metadata, "heuristicRateDistortion": heuristic_rd_summary, "residual": residual_metadata, "errorArtifacts": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}}, "scale_correspondence": {"method": "Hungarian one-to-one best match on IoU, normalized centroid, appearance, and log-area terms", "bestMatches": cross_scale, "overlapLinks": cross_scale_overlaps, "normalizedOverlapMatrix": overlap_matrix, "links": cross_scale}, "scale_consistency": correspondence_summary, "parameterSensitivity": sensitivity_report, "validity": validity, "profiling": profile, "researchPrototype": {"status": "deterministic_internal_evaluation", "notScientificValidation": True, "notCodecRateMeasurement": True}, "artifactStorage": {"schema": "ArtifactStorage@0.7", "basis": "actual_emitted_file_bytes", "files": {}, "totalBytes": 0},
         "artifacts": {"features": "features.npz", "residuals": residual_metadata.get("artifact"), "parameterSensitivity": "sensitivity/report.json" if sensitivity_report else None, "reconstructedPng": "reconstructed.png", "svg": "reconstruction.svg", "reconstructions": {name: value["artifact"] for name, value in reconstruction_metadata.items()}, "errors": {"absolutePixelError": "errors/absolute-error.png", "parametricError": "errors/parametric-error.png", "perRegionError": "errors/per-region-error.png", "residualEnergy": "errors/residual-energy.png"}, "overlays": {"brightness": "overlays/brightness.png", "edgeStrength": "overlays/edge-strength.png", "gradientX": "overlays/gradient-x.png", "gradientY": "overlays/gradient-y.png", "complexity": "overlays/complexity.png", "relationshipGraph": "overlays/relationship-graph.png", "normalizedDistanceGraph": "overlays/normalized-distance-graph.png", "residualEnergy": "errors/residual-energy.png"}}, "metrics": quality, "quality_metrics": quality,
     }
+    report("serialization", 94, "Serializing representation evidence and measured artifact metadata.")
     serialization_started = time.perf_counter(); representation_path = output_dir / "representation.json"; quality["processingTimeMs"] = rounded((time.perf_counter() - started) * 1000, 3)
     for _ in range(5):
         representation_path.write_text(json.dumps(representation, separators=(",", ":")), encoding="utf-8")
@@ -244,4 +256,5 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any]) -> D
             break
         representation["artifactStorage"] = measured_storage
     profile["serializationMs"] = rounded((time.perf_counter() - serialization_started) * 1000, 3)
+    report("analysis_complete", 96, "Analysis computation completed; artifacts are ready for secure upload.")
     return {"representationPath": str(representation_path), "entityCount": len(all_entities), "relationshipCount": len(relationships)}

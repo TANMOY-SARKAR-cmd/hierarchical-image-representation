@@ -16,7 +16,10 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--config", required=True)
     arguments = parser.parse_args()
-    result = analyze(Path(arguments.input), Path(arguments.output), json.loads(arguments.config))
+    def report(stage: str, percent: int, message: str) -> None:
+        print(json.dumps({"event": "progress", "stage": stage, "percent": percent, "message": message}), flush=True)
+
+    result = analyze(Path(arguments.input), Path(arguments.output), json.loads(arguments.config), progress=report)
     print(json.dumps({"ok": True, **result}))
 
 

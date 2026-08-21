@@ -4,10 +4,12 @@ vi.mock("../imageAnalysis", () => ({
   AnalysisAdmissionError: class AnalysisAdmissionError extends Error {},
   analyzeImage: vi.fn(),
   getAnalysisCacheTelemetry: vi.fn(),
+  getAnalysisJob: vi.fn(),
   getAnalysisResult: vi.fn(),
+  startAnalysisJob: vi.fn(),
 }));
 
-import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
+import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, startAnalysisJob } from "../imageAnalysis";
 import { imageAnalysisRouter } from "./imageAnalysis";
 
 const baseInput = {
@@ -71,6 +73,19 @@ describe("imageAnalysis router", () => {
     vi.mocked(analyzeImage).mockRejectedValue(new AnalysisAdmissionError("Analysis capacity is busy. Please retry shortly."));
     const caller = imageAnalysisRouter.createCaller(userContext);
     await expect(caller.process(baseInput)).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS", message: expect.stringMatching(/capacity is busy/i) });
+  });
+
+  it("starts and exposes only the owner-scoped analysis job status", async () => {
+    const queued = { jobId: "job-progress", ownerId: "1", status: "running", stage: "segmentation", percent: 38, message: "Built deterministic micro-regions.", createdAt: 1_000, updatedAt: 2_000, completedAt: null, error: null, resultAvailable: false };
+    vi.mocked(startAnalysisJob).mockReturnValue(queued);
+    vi.mocked(getAnalysisJob).mockReturnValue(queued);
+    const owner = imageAnalysisRouter.createCaller(userContext);
+    const otherUser = imageAnalysisRouter.createCaller({ user: { id: 2, role: "user" } } as never);
+
+    await expect(owner.start(baseInput)).resolves.toEqual(queued);
+    await expect(owner.status({ jobId: "job-progress" })).resolves.toEqual(queued);
+    await expect(otherUser.status({ jobId: "job-progress" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(startAnalysisJob).toHaveBeenCalledWith(baseInput, "1", expect.any(String));
   });
 
   it("requires authentication for analysis submission and result inspection", async () => {

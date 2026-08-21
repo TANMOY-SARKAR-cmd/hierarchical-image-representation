@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -247,6 +249,37 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
         self.assertEqual(aggregate["count"], union_entity["geometry"]["area"])
         self.assertAlmostEqual(aggregate["sum"]["lab_l"], first_entity["statistics"]["sufficient"]["sum"]["lab_l"] + second_entity["statistics"]["sufficient"]["sum"]["lab_l"], places=8)
         self.assertEqual(union_entity["vector"]["aggregation"], "child_sufficient_statistics_and_canonical_mask_geometry")
+
+    def test_reports_monotonic_server_side_analysis_stages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            image = np.zeros((24, 30, 3), dtype=np.uint8)
+            image[:, :15] = [220, 60, 80]
+            image[:, 15:] = [50, 170, 210]
+            source = workspace / "progress-fixture.png"
+            Image.fromarray(image).save(source)
+            events = []
+            analyze(source, workspace / "output", {"maxImagePixels": 10_000, "scaleLevels": [1], "slicSegments": 12, "minimumRegionPixels": 2, "runScaleConsistency": False, "residualEnabled": False}, progress=lambda stage, percent, message: events.append((stage, percent, message)))
+            self.assertEqual(events[0][0], "validating_input")
+            self.assertEqual(events[-1][0], "analysis_complete")
+            self.assertEqual([event[1] for event in events], sorted(event[1] for event in events))
+            self.assertTrue(all(0 <= event[1] <= 100 and event[2] for event in events))
+            self.assertTrue({"feature_extraction", "segmentation", "merge_tree", "relationship_graph", "reconstruction", "serialization"}.issubset({event[0] for event in events}))
+
+    def test_cli_emits_jsonl_progress_before_its_compatible_completion_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            image = np.zeros((20, 24, 3), dtype=np.uint8)
+            image[:, :12] = [200, 50, 80]
+            image[:, 12:] = [40, 170, 220]
+            source = workspace / "cli-progress.png"
+            Image.fromarray(image).save(source)
+            command = [sys.executable, str(Path(__file__).with_name("representation_engine.py")), "--input", str(source), "--output", str(workspace / "output"), "--config", json.dumps({"maxImagePixels": 10_000, "scaleLevels": [1], "slicSegments": 12, "minimumRegionPixels": 2, "runScaleConsistency": False, "residualEnabled": False})]
+            completed = subprocess.run(command, cwd=Path(__file__).parent, check=True, capture_output=True, text=True)
+            records = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
+            self.assertTrue(any(record.get("event") == "progress" for record in records[:-1]))
+            self.assertTrue(records[-1]["ok"])
+            self.assertIn("representationPath", records[-1])
 
 
 if __name__ == "__main__":

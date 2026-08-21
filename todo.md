@@ -104,3 +104,10 @@
 - [x] Validate, checkpoint, synchronize, and deliver the completed v0.7 hybrid energy-tree redesign.
 - [x] Replace non-unique relationship-list React keys with collision-safe identifiers and add a regression test covering multiple edges with the same endpoints.
 - [x] Render duplicate-endpoint relationship rows in the workbench regression and assert React emits no duplicate-key warning.
+- [x] Audit the supplied private fixture across constant, parametric, residual-disabled, and residual-budget reconstruction outputs; record only non-semantic fidelity evidence and remove temporary files afterward.
+- [x] Emit deterministic Python JSONL stage events and preserve the final CLI completion contract.
+- [x] Add owner-scoped process-local analysis jobs with protected start/status/result access and truthful stage progress updates.
+- [x] Add an accessible progress bar with stage, percentage, elapsed time, polling cleanup, and failure states to the workbench.
+- [x] Clarify reconstruction mode selection with structural default output, per-mode metrics, residual coverage/bytes, and artifact-routing regression coverage.
+- [x] Verify through UI regression that completed jobs open on structural BASE and mode switching routes to the correct constant, parametric, and residual artifacts with their evidence.
+- [x] Validate, checkpoint, synchronize, and deliver the progress-reporting and reconstruction-comparison upgrade.
