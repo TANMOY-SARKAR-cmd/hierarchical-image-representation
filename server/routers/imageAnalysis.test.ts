@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../imageAnalysis", () => ({
+  AnalysisAdmissionError: class AnalysisAdmissionError extends Error {},
   analyzeImage: vi.fn(),
   getAnalysisCacheTelemetry: vi.fn(),
   getAnalysisResult: vi.fn(),
 }));
 
-import { analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
+import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
 import { imageAnalysisRouter } from "./imageAnalysis";
 
 const baseInput = {
@@ -62,8 +63,14 @@ describe("imageAnalysis router", () => {
     const caller = imageAnalysisRouter.createCaller({} as never);
     const response = await caller.process(baseInput);
 
-    expect(analyzeImage).toHaveBeenCalledWith(baseInput);
+    expect(analyzeImage).toHaveBeenCalledWith(baseInput, expect.any(String));
     expect(response.jobId).toBe("job-123");
+  });
+
+  it("returns a typed throttling response when local admission is exhausted", async () => {
+    vi.mocked(analyzeImage).mockRejectedValue(new AnalysisAdmissionError("Analysis capacity is busy. Please retry shortly."));
+    const caller = imageAnalysisRouter.createCaller({} as never);
+    await expect(caller.process(baseInput)).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS", message: expect.stringMatching(/capacity is busy/i) });
   });
 
   it("returns a not-found error for an unavailable in-memory result", async () => {

@@ -7,8 +7,8 @@ import json
 from copy import deepcopy
 from typing import Any, Dict
 
-SCHEMA_VERSION = "0.4.0"
-SUPPORTED_VERSIONS = ("0.2.0", "0.3.0", "0.4.0")
+SCHEMA_VERSION = "0.5.0"
+SUPPORTED_VERSIONS = ("0.2.0", "0.3.0", "0.4.0", "0.5.0")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "maxImagePixels": 786_432,
@@ -68,4 +68,10 @@ def read_compatible_representation(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"version": version, "entities": payload.get("entities", []), "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "legacy-v0.2"}
     if version == "0.3.0":
         return {"version": version, "entities": payload.get("entities", []), "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.3"}
-    return {"version": version, "entities": payload.get("entities", []), "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.4"}
+    entities = deepcopy(payload.get("entities", []))
+    if version == "0.4.0":
+        for entity in entities:
+            if entity.get("crossScaleParentId") and not entity.get("crossScaleMatchId"):
+                entity["crossScaleMatchId"] = entity["crossScaleParentId"]
+        return {"version": version, "entities": entities, "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.4-with-correspondence-alias"}
+    return {"version": version, "entities": entities, "relationships": payload.get("relationships", []), "hierarchy": payload.get("hierarchy", {}), "compatibility": "native-v0.5"}

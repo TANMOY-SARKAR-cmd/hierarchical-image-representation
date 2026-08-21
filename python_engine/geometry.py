@@ -87,7 +87,7 @@ def make_entity(entity_id: str, entity_type: str, level: int, resolution_factor:
         "appearance": {"meanRGB": [rounded(value * 255.0, 4) for value in (mean_r, mean_g, mean_b)], "meanLab": [rounded(value, 6) for value in (lab_l, lab_a, lab_b)], "brightness": rounded(brightness, 8), "varianceRGB": [rounded(value, 8) for value in (var_r, var_g, var_b)], "brightnessVariance": rounded(brightness_var, 8), "meanGradient": rounded(gradient, 8), "gradientVariance": rounded(gradient_variance, 8), "edgeDensity": rounded(edge_density, 8), "textureMeasure": rounded(texture, 8), "entropy": rounded(entropy, 8)},
         "statistics": {"memberPixelCount": geometry["area"], "sufficient": statistics, "complexity": rounded(complexity, 8)},
         "shape": shape,
-        "vector": {"schema": "EntityVector@0.3", "dimension": len(values), "values": [rounded(value, 8) for value in values], "structured": structured, "provenance": "canonical_mask_union", "aggregation": "sufficient_statistics_and_canonical_mask_geometry"},
-        "children": child_ids, "parentId": None, "crossScaleParentId": None,
+        "vector": {"schema": "EntityVector@0.5", "dimension": len(values), "values": [rounded(value, 8) for value in values], "structured": structured, "provenance": "canonical_mask_union", "aggregation": "sufficient_statistics_and_canonical_mask_geometry"},
+        "children": child_ids, "parentId": None, "crossScaleMatchId": None,
         "lineage": lineage or {"operation": "segment", "parents": []},
     }

@@ -41,6 +41,6 @@ def match_scales(base_entities: List[Dict[str, Any]], base_masks: Dict[str, np.n
         if detail["cost"] > 0.72:
             continue
         source, target = base_entities[int(row)], coarse_entities[int(column)]
-        source["crossScaleParentId"] = target["id"]
+        source["crossScaleMatchId"] = target["id"]
         links.append({"sourceId": source["id"], "targetId": target["id"], "relationshipType": ["cross_scale_correspondence"], "confidence": rounded(1.0 - detail["cost"], 8), **{key: rounded(value, 8) for key, value in detail.items()}})
     return links

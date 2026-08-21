@@ -72,10 +72,41 @@ const supportedMimeTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 const supportedExtensions = new Set(["png", "jpg", "jpeg", "webp"]);
 const DEFAULT_RESULT_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_RESULT_CACHE_CAPACITY = 100;
+const DEFAULT_SUBMISSION_WINDOW_MS = 60 * 1000;
+const DEFAULT_SUBMISSION_MAX_PER_WINDOW = 3;
+const DEFAULT_MAX_INFLIGHT_ANALYSES = 2;
 
 function positiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export class AnalysisAdmissionError extends Error {
+  readonly code = "TOO_MANY_REQUESTS";
+}
+
+export class AnalysisSubmissionAdmission {
+  private readonly attempts = new Map<string, { windowStartedAt: number; count: number }>();
+  private inFlight = 0;
+
+  constructor(private readonly windowMs: number, private readonly maxPerWindow: number, private readonly maxInFlight: number) {}
+
+  acquire(clientKey: string, now = Date.now()) {
+    if (this.inFlight >= this.maxInFlight) throw new AnalysisAdmissionError("Analysis capacity is busy. Please retry shortly.");
+    for (const [key, entry] of Array.from(this.attempts.entries())) if (now - entry.windowStartedAt >= this.windowMs) this.attempts.delete(key);
+    const entry = this.attempts.get(clientKey);
+    if (entry && entry.count >= this.maxPerWindow) throw new AnalysisAdmissionError("Analysis submission quota reached. Please wait before retrying.");
+    this.attempts.set(clientKey, entry ? { ...entry, count: entry.count + 1 } : { windowStartedAt: now, count: 1 });
+    this.inFlight += 1;
+  }
+
+  release() {
+    this.inFlight = Math.max(0, this.inFlight - 1);
+  }
+
+  telemetry() {
+    return { inFlight: this.inFlight, trackedClients: this.attempts.size, windowMs: this.windowMs, maxPerWindow: this.maxPerWindow, maxInFlight: this.maxInFlight };
+  }
 }
 
 export class AnalysisResultCache {
@@ -152,12 +183,35 @@ const activeResults = new AnalysisResultCache(
   positiveInteger(process.env.ANALYSIS_RESULT_CACHE_CAPACITY, DEFAULT_RESULT_CACHE_CAPACITY)
 );
 
+const submissionAdmission = new AnalysisSubmissionAdmission(
+  positiveInteger(process.env.ANALYSIS_SUBMISSION_WINDOW_MS, DEFAULT_SUBMISSION_WINDOW_MS),
+  positiveInteger(process.env.ANALYSIS_SUBMISSION_MAX_PER_WINDOW, DEFAULT_SUBMISSION_MAX_PER_WINDOW),
+  positiveInteger(process.env.ANALYSIS_MAX_INFLIGHT, DEFAULT_MAX_INFLIGHT_ANALYSES)
+);
+
 function safeName(fileName: string) {
   const extension = path.extname(fileName).toLowerCase().replace(".", "");
   if (!supportedExtensions.has(extension)) {
     throw new Error("Supported image formats are PNG, JPEG, and WebP.");
   }
   return extension === "jpg" ? "jpeg" : extension;
+}
+
+export function decodeBase64Image(dataBase64: string) {
+  const normalized = dataBase64.trim();
+  if (!normalized || normalized.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
+    throw new Error("The uploaded image payload is not valid base64.");
+  }
+  const data = Buffer.from(normalized, "base64");
+  if (!data.length || data.toString("base64") !== normalized) throw new Error("The uploaded image payload is not valid base64.");
+  return data;
+}
+
+export function validateImageSignature(data: Buffer, mimeType: string, extension: string) {
+  const normalizedExtension = extension === "jpg" ? "jpeg" : extension;
+  const expectedMime = normalizedExtension === "png" ? "image/png" : normalizedExtension === "jpeg" ? "image/jpeg" : "image/webp";
+  const signatureMatches = mimeType === "image/png" ? data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) : mimeType === "image/jpeg" ? data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff : mimeType === "image/webp" ? data.length >= 12 && data.subarray(0, 4).toString("ascii") === "RIFF" && data.subarray(8, 12).toString("ascii") === "WEBP" : false;
+  if (mimeType !== expectedMime || !signatureMatches) throw new Error("The uploaded image filename, MIME type, and binary signature must agree.");
 }
 
 function runPython(inputPath: string, outputPath: string, config: AnalysisConfig) {
@@ -213,28 +267,30 @@ export async function analyzeImage(input: {
   mimeType: string;
   dataBase64: string;
   config: AnalysisConfig;
-}): Promise<AnalysisResult> {
+}, admissionKey = "direct"): Promise<AnalysisResult> {
   if (!supportedMimeTypes.has(input.mimeType)) {
     throw new Error("Supported image formats are PNG, JPEG, and WebP.");
   }
   const extension = safeName(input.fileName);
-  const data = Buffer.from(input.dataBase64, "base64");
-  if (!data.length) throw new Error("The uploaded image is empty.");
+  const data = decodeBase64Image(input.dataBase64);
+  validateImageSignature(data, input.mimeType, extension);
   const hardLimit = Number(process.env.MAX_IMAGE_BYTES ?? 8 * 1024 * 1024);
   const allowedSize = Math.min(input.config.maxFileSizeBytes, hardLimit);
   if (data.byteLength > allowedSize) {
     throw new Error(`The uploaded image exceeds the configured ${(allowedSize / 1024 / 1024).toFixed(1)} MB limit.`);
   }
 
-  const jobId = nanoid(14);
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "hierarchy-analysis-"));
-  const inputPath = path.join(workspace, `source.${extension}`);
-  const outputPath = path.join(workspace, "output");
+  submissionAdmission.acquire(admissionKey);
   try {
-    await fs.mkdir(outputPath, { recursive: true });
-    await fs.writeFile(inputPath, data);
-    await runPython(inputPath, outputPath, input.config);
-    const representation = JSON.parse(await fs.readFile(path.join(outputPath, "representation.json"), "utf8")) as Record<string, unknown>;
+    const jobId = nanoid(14);
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "hierarchy-analysis-"));
+    const inputPath = path.join(workspace, `source.${extension}`);
+    const outputPath = path.join(workspace, "output");
+    try {
+      await fs.mkdir(outputPath, { recursive: true });
+      await fs.writeFile(inputPath, data);
+      await runPython(inputPath, outputPath, input.config);
+      const representation = JSON.parse(await fs.readFile(path.join(outputPath, "representation.json"), "utf8")) as Record<string, unknown>;
     const overlayUrls = {
       brightness: await uploadArtifact(jobId, outputPath, "overlays/brightness.png", "image/png"),
       edgeStrength: await uploadArtifact(jobId, outputPath, "overlays/edge-strength.png", "image/png"),
@@ -271,11 +327,14 @@ export async function analyzeImage(input: {
       reconstructions,
       errors,
     };
-    const result = { jobId, representation, artifactUrls };
-    activeResults.remember(result);
-    return result;
+      const result = { jobId, representation, artifactUrls };
+      activeResults.remember(result);
+      return result;
+    } finally {
+      await fs.rm(workspace, { recursive: true, force: true });
+    }
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
+    submissionAdmission.release();
   }
 }
 

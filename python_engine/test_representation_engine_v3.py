@@ -10,6 +10,7 @@ from engine import analyze
 from graph import relationship_for
 from geometry import make_entity
 from hierarchy import graph_group_level
+from reconstruction_models import fit_appearance_model
 from schema import SCHEMA_VERSION, read_compatible_representation
 from segmentation import segment_image
 
@@ -33,7 +34,8 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertIn("configHash", representation["experiment"])
             fields = representation["feature_schema"]["PixelVector"]["fields"]
             self.assertIn("appearance.lab_l", fields); self.assertIn("local_structure.gradient_orientation", fields)
-            self.assertEqual(representation["hierarchy"]["grouping"], "connectivity-constrained graph agglomeration")
+            self.assertEqual(representation["hierarchy"]["grouping"], "fixed-depth greedy pairwise connectivity-constrained graph grouping")
+            self.assertTrue(representation["experiment"]["researchPrototype"])
             self.assertTrue(representation["validity"]["valid"])
             self.assertAlmostEqual(representation["validity"]["leafCoverage"], 1.0)
             self.assertFalse(representation["validity"]["duplicatePixelStorage"])
@@ -60,11 +62,18 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             self.assertEqual(representation["scale_correspondence"]["method"].split(" ")[0], "Hungarian")
             self.assertGreater(len(representation["scale_correspondence"]["links"]), 0)
             self.assertTrue(all(0 <= link["confidence"] <= 1 and link["cost"] <= 0.72 for link in representation["scale_correspondence"]["links"]))
-            self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.4")
+            self.assertTrue(all("crossScaleParentId" not in entity for entity in representation["entities"]))
+            self.assertTrue(any(entity.get("crossScaleMatchId") for entity in representation["entities"]))
+            self.assertEqual(read_compatible_representation(representation)["compatibility"], "native-v0.5")
             self.assertIn("slic", representation["segmentationDiagnostics"])
             self.assertIn("residual", representation["reconstruction_metadata"]["outputs"])
-            self.assertIn("parametric", representation["reconstruction_metadata"]["rateDistortion"])
+            self.assertIn("parametric", representation["reconstruction_metadata"]["heuristicRateDistortion"]["modes"])
+            self.assertEqual(representation["reconstruction_metadata"]["heuristicRateDistortion"]["basis"], "parameter_payload_estimate_not_serialized_storage")
+            self.assertEqual(representation["artifactStorage"]["basis"], "actual_emitted_file_bytes")
+            self.assertEqual(representation["artifactStorage"]["files"]["features.npz"], (output / "features.npz").stat().st_size)
+            self.assertEqual(representation["artifactStorage"]["files"]["residuals.npz"], (output / "residuals.npz").stat().st_size)
             self.assertTrue(all(entity.get("appearanceModel", {}).get("model") in {"constant", "affine", "quadratic"} for entity in representation["entities"] if entity["type"] == "micro_region"))
+            self.assertTrue(all("boundaryResidual" in entity.get("appearanceModel", {}) for entity in representation["entities"] if entity["type"] == "micro_region"))
             for relative_path in ("features.npz", "residuals.npz", "representation.json", "reconstructed.png", "reconstruction.svg", "overlays/relationship-graph.png", "reconstructions/level4.png", "reconstructions/parametric.png", "reconstructions/residual.png", "errors/residual-energy.png"):
                 self.assertTrue((output / relative_path).exists(), relative_path)
 
@@ -103,6 +112,26 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
     def test_compatibility_reader_accepts_v02_without_mutating_its_history(self):
         payload = {"representation_version": "0.2.0", "entities": [], "relationships": [], "hierarchy": {}}
         self.assertEqual(read_compatible_representation(payload)["compatibility"], "legacy-v0.2")
+
+    def test_v04_compatibility_maps_historical_cross_scale_parent_to_match_alias(self):
+        payload = {"representation_version": "0.4.0", "entities": [{"id": "native", "crossScaleParentId": "coarse"}], "relationships": [], "hierarchy": {}}
+        compatible = read_compatible_representation(payload)
+        self.assertEqual(compatible["compatibility"], "native-v0.4-with-correspondence-alias")
+        self.assertEqual(compatible["entities"][0]["crossScaleMatchId"], "coarse")
+        self.assertEqual(payload["entities"][0].get("crossScaleMatchId"), None)
+
+    def test_boundary_residual_is_candidate_specific_and_can_influence_model_score(self):
+        from schema import resolved_config
+
+        image = np.zeros((12, 12, 3), dtype=np.uint8)
+        for x in range(2, 10):
+            image[2:10, x] = [20 + x * 18, 80 + x * 8, 180 - x * 10]
+        mask = np.zeros((12, 12), dtype=bool); mask[2:10, 2:10] = True
+        fields = {"edge_strength": np.ones((12, 12), dtype=np.float64)}
+        model = fit_appearance_model(mask, image, fields, resolved_config({"appearanceModelCandidates": ["constant", "affine"], "modelPenalty": 0.0, "boundaryLeakagePenalty": 1.0}))
+        candidates = {item["model"]: item for item in model["candidates"]}
+        self.assertNotEqual(candidates["constant"]["boundaryResidual"], candidates["affine"]["boundaryResidual"])
+        self.assertEqual(model["boundaryResidual"], candidates[model["model"]]["boundaryResidual"])
 
     def test_cross_scale_matching_honors_disable_and_pixel_ceiling(self):
         with tempfile.TemporaryDirectory() as directory:

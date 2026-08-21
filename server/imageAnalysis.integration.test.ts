@@ -52,7 +52,7 @@ describe("Node-to-Python image analysis integration", () => {
     const npzArtifacts = uploadedArtifacts.filter(item => item.contentType === "application/octet-stream");
     const pngArtifacts = uploadedArtifacts.filter(item => item.contentType === "image/png");
     const svgArtifact = uploadedArtifacts.find(item => item.contentType === "image/svg+xml");
-    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ representation_version: "0.4.0", hierarchy: { grouping: "connectivity-constrained graph agglomeration" }, reconstruction_metadata: { outputs: { parametric: expect.any(Object), residual: expect.any(Object) } } });
+    expect(JSON.parse(jsonArtifact?.data.toString("utf8") ?? "{}")).toMatchObject({ representation_version: "0.5.0", hierarchy: { grouping: "fixed-depth greedy pairwise connectivity-constrained graph grouping" }, reconstruction_metadata: { outputs: { parametric: expect.any(Object), residual: expect.any(Object) }, heuristicRateDistortion: { basis: "parameter_payload_estimate_not_serialized_storage" } }, artifactStorage: { basis: "actual_emitted_file_bytes" } });
     expect(npzArtifacts).toHaveLength(2);
     expect(npzArtifacts.every(item => item.data.subarray(0, 4).toString("latin1") === "PK\u0003\u0004")).toBe(true);
     expect(pngArtifacts).toHaveLength(21);

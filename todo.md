@@ -75,3 +75,10 @@
 - [x] Instrument the in-memory completed-result cache with aggregate privacy-preserving retention telemetry.
 - [x] Expose aggregate cache telemetry through an admin-only typed procedure and admin workbench panel.
 - [x] Add cache telemetry regression coverage, operational documentation, validation, checkpointing, synchronization, and delivery.
+- [x] Advance the active representation contract to v0.5 with corrected correspondence naming and explicit research-prototype semantics.
+- [x] Replace region-interior edge density with a candidate-specific edge-weighted boundary-band reconstruction residual in appearance-model selection.
+- [x] Separate heuristic model rate-distortion from measured emitted artifact storage accounting.
+- [x] Correct fixed-depth greedy pairwise grouping terminology without changing the established deterministic hierarchy algorithm.
+- [x] Add strict base64 and file-signature validation plus bounded public submission quota and concurrent-job admission control.
+- [x] Archive inactive legacy engine paths while preserving active v0.2–v0.5 representation compatibility.
+- [x] Update the workbench, regression tests, benchmark terminology, documentation, validation, checkpointing, synchronization, and delivery for v0.5.

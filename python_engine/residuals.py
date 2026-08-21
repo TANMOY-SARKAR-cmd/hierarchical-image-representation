@@ -27,5 +27,4 @@ def bounded_residual(original: np.ndarray, base: np.ndarray, config: Dict[str, A
     reconstruction = np.clip(base.astype(np.int16) + quantized.astype(np.int16) * step, 0, 255).astype(np.uint8)
     kept = int(keep.sum()); estimate = kept * 8
     mse = float(np.mean((original.astype(np.float32) - reconstruction.astype(np.float32)) ** 2))
-    return reconstruction, quantized, {"schema": "QuantizedResidual@0.4", "quantizationStep": step, "budgetBytes": budget, "estimatedBytes": estimate, "coveredPixels": kept, "coverage": rounded(kept / max(magnitude.size, 1), 8), "rd": rate_distortion(mse, estimate, magnitude.size, config)}
-
+    return reconstruction, quantized, {"schema": "QuantizedResidual@0.5", "quantizationStep": step, "budgetBytes": budget, "estimatedBytes": estimate, "coveredPixels": kept, "coverage": rounded(kept / max(magnitude.size, 1), 8), "heuristicRateDistortion": rate_distortion(mse, estimate, magnitude.size, config)}

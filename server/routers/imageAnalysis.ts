@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
+import { AnalysisAdmissionError, analyzeImage, getAnalysisCacheTelemetry, getAnalysisResult } from "../imageAnalysis";
 import { adminProcedure, publicProcedure, router } from "../_core/trpc";
 
 const analysisConfig = z.object({
@@ -31,6 +31,13 @@ const analysisConfig = z.object({
   compareSegmentationBaselines: z.boolean().default(false),
 });
 
+function admissionKey(ctx: { user: { id: number } | null; req?: { headers?: Record<string, string | string[] | undefined>; ip?: string; socket?: { remoteAddress?: string } } }) {
+  if (ctx.user) return `user:${ctx.user.id}`;
+  const forwarded = ctx.req?.headers?.["x-forwarded-for"];
+  const address = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0]?.trim() ?? ctx.req?.ip ?? ctx.req?.socket?.remoteAddress ?? "anonymous";
+  return `client:${address.slice(0, 128)}`;
+}
+
 export const imageAnalysisRouter = router({
   process: publicProcedure
     .input(
@@ -41,10 +48,11 @@ export const imageAnalysisRouter = router({
         config: analysisConfig,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       try {
-        return await analyzeImage(input);
+        return await analyzeImage(input, admissionKey(ctx));
       } catch (error) {
+        if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: error instanceof Error ? error.message : "Image analysis could not be completed.",
