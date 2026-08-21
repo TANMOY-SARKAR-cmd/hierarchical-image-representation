@@ -111,3 +111,6 @@
 - [x] Clarify reconstruction mode selection with structural default output, per-mode metrics, residual coverage/bytes, and artifact-routing regression coverage.
 - [x] Verify through UI regression that completed jobs open on structural BASE and mode switching routes to the correct constant, parametric, and residual artifacts with their evidence.
 - [x] Validate, checkpoint, synchronize, and deliver the progress-reporting and reconstruction-comparison upgrade.
+- [x] Add an accessible swipe comparison slider that layers the original and selected reconstruction artifacts without client-side image processing.
+- [x] Display selected-output PSNR and clearly labeled residual correction coverage in the comparative results view.
+- [x] Add slider interaction, selected-artifact routing, and responsive comparison regressions; validate, checkpoint, synchronize, and deliver the enhancement.

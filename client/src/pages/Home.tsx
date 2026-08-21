@@ -143,6 +143,19 @@ function AnalysisProgressPanel({ job }: { job: AnalysisJobStatus | null | undefi
   </section>;
 }
 
+function ImageComparisonSlider({ sourceUrl, reconstructionUrl, position, onPositionChange, width, height, reconstructionLabel }: { sourceUrl: string; reconstructionUrl: string; position: number; onPositionChange: (value: number) => void; width: number; height: number; reconstructionLabel: string }) {
+  return <div className="rounded border border-white/8 bg-black p-2">
+    <div className="relative overflow-hidden rounded bg-slate-950" style={{ aspectRatio: `${width} / ${height}` }}>
+      <img src={reconstructionUrl} alt={`${reconstructionLabel} reconstruction`} className="absolute inset-0 h-full w-full object-contain" />
+      <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}><img src={sourceUrl} alt="Original input revealed by comparison slider" className="h-full w-full object-contain" /></div>
+      <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 w-px bg-cyan-100 shadow-[0_0_0_1px_rgba(8,47,73,0.9),0_0_14px_rgba(34,211,238,0.8)]" style={{ left: `${position}%` }}><span className="absolute left-1/2 top-1/2 grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-cyan-100/80 bg-slate-950/95 text-xs text-cyan-100">↔</span></div>
+      <input type="range" min="0" max="100" value={position} onChange={event => onPositionChange(Number(event.target.value))} aria-label="Original and reconstruction comparison position" aria-describedby="comparison-slider-description" className="absolute inset-0 h-full w-full cursor-ew-resize opacity-0 focus-visible:opacity-100 focus-visible:outline-none" />
+    </div>
+    <div className="mt-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-wider"><span className="text-cyan-200">Original input</span><span className="text-emerald-200">{reconstructionLabel}</span></div>
+    <p id="comparison-slider-description" className="sr-only">Use left and right arrow keys or drag horizontally to reveal the original input on the left and the selected reconstruction on the right.</p>
+  </div>;
+}
+
 function getDataBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -288,6 +301,8 @@ export default function Home() {
   const [residualBudgetKb, setResidualBudgetKb] = useState(192);
   const [runParameterSensitivity, setRunParameterSensitivity] = useState(false);
   const [reconstructionLevel, setReconstructionLevel] = useState<string>("residual");
+  const [comparisonMode, setComparisonMode] = useState<"swipe" | "side-by-side">("swipe");
+  const [comparisonPosition, setComparisonPosition] = useState(50);
   const [selectedRelationshipTypes, setSelectedRelationshipTypes] = useState<string[]>([]);
   const [adjacentOnly, setAdjacentOnly] = useState(false);
   const [minimumConfidence, setMinimumConfidence] = useState(0);
@@ -331,6 +346,10 @@ export default function Home() {
   useEffect(() => () => {
     if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
   }, []);
+
+  useEffect(() => {
+    setComparisonPosition(50);
+  }, [sourceUrl, reconstructionUrl]);
 
   useEffect(() => {
     const result = resultQuery.data;
@@ -533,10 +552,11 @@ export default function Home() {
         <section className="min-w-0 space-y-4">
           <section className="overflow-hidden rounded-xl border border-cyan-100/10 bg-slate-900/80 shadow-2xl shadow-slate-950/20">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-4 py-3"><div><h2 className="text-sm font-semibold text-slate-100">Comparative reconstruction</h2><p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">Source · feature field · hierarchical decoding</p></div><div className="flex flex-wrap items-center gap-1"><div className="mr-1 hidden font-mono text-[9px] uppercase tracking-wider text-slate-600 sm:block">decode</div>{(["level1", "level2", "level3", "level4", "full"] as const).map(level => <Button key={level} type="button" variant="outline" size="sm" disabled={!artifacts} onClick={() => setReconstructionLevel(level)} className={cn("h-7 border-white/10 bg-black/20 px-2 font-mono text-[9px] text-slate-500", reconstructionLevel === level && "border-emerald-300/40 bg-emerald-300/10 text-emerald-100")}>{level === "full" ? "FULL" : level.toUpperCase()}</Button>)}<div className="ml-1 rounded border border-white/10 bg-black/20 px-2 py-1 font-mono text-[10px] text-slate-400">{representation ? `${representation.image.width} × ${representation.image.height}` : "WAITING"}</div></div></div>
-            <div className="grid gap-px bg-white/10 md:grid-cols-2">
+            {representation ? <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 bg-black/15 px-4 py-2.5"><div className="flex flex-wrap items-center gap-2 font-mono text-[10px]"><span className="rounded border border-cyan-300/20 bg-cyan-300/[0.06] px-2 py-1 text-cyan-100">PSNR {Number(selectedReconstructionOutput?.psnr ?? 0).toFixed(2)} dB</span><span className="rounded border border-emerald-300/20 bg-emerald-300/[0.06] px-2 py-1 text-emerald-100">Pixel correction {residualMetadata?.artifactEmitted ? `${(residualMetadata.coverage * 100).toFixed(1)}%` : "not applied"}</span><span className="text-slate-500">{reconstructionLevel === "residual" ? "DETAIL residual coverage" : "DETAIL correction availability"}</span></div><div className="flex rounded border border-white/10 bg-black/30 p-0.5" aria-label="Comparison view"><Button type="button" variant="outline" size="sm" onClick={() => setComparisonMode("swipe")} disabled={!sourceUrl || !reconstructionUrl} className={cn("h-6 border-0 px-2 font-mono text-[9px]", comparisonMode === "swipe" && "bg-cyan-300/15 text-cyan-100")}>SWIPE</Button><Button type="button" variant="outline" size="sm" onClick={() => setComparisonMode("side-by-side")} className={cn("h-6 border-0 px-2 font-mono text-[9px]", comparisonMode === "side-by-side" && "bg-cyan-300/15 text-cyan-100")}>SPLIT</Button></div></div> : null}
+            {comparisonMode === "swipe" && sourceUrl && reconstructionUrl && representation ? <div className="bg-slate-950 p-3"><ImageComparisonSlider sourceUrl={sourceUrl} reconstructionUrl={reconstructionUrl} position={comparisonPosition} onPositionChange={setComparisonPosition} width={representation.image.width} height={representation.image.height} reconstructionLabel={reconstructionLevel === "full" ? "Structural reconstruction" : reconstructionLevel.toUpperCase()} /></div> : <div className="grid gap-px bg-white/10 md:grid-cols-2">
               <div className="relative min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Original / overlay</span><span className="text-cyan-300">{selectedOverlay === "none" ? "RGB" : selectedOverlay}</span></div>{sourceUrl ? <div className="relative overflow-hidden rounded border border-white/8 bg-black"><img src={sourceUrl} alt="Uploaded source" className="max-h-[480px] w-full object-contain" />{relationshipOverlayActive && representation ? <><GraphEdgeOverlay image={representation.image} entities={entities} relationships={filteredRelationships} distanceMode={selectedOverlay === "normalizedDistanceGraph"} /><div className="absolute bottom-2 left-2 rounded border border-cyan-300/25 bg-slate-950/80 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-cyan-100">{filteredRelationships.length} filtered edges</div></> : overlayUrl ? <img src={overlayUrl} alt="Selected feature overlay" className="absolute inset-0 h-full w-full object-contain opacity-60 mix-blend-screen" /> : null}</div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-cyan-300/15 bg-[linear-gradient(rgba(34,211,238,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.035)_1px,transparent_1px)] bg-[size:24px_24px] text-center"><div className="absolute inset-6 rounded-[38%_62%_55%_45%/45%_38%_62%_55%] border border-cyan-300/10" /><div className="absolute inset-16 rounded-[46%_54%_35%_65%/60%_42%_58%_40%] border border-violet-300/10" /><div className="relative"><Boxes className="mx-auto mb-3 h-8 w-8 text-cyan-500/60" /><p className="text-sm font-medium text-slate-400">Load an image to sample feature fields.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">RGB → gradients → microregions</p></div></div>}</div>
               <div className="min-h-72 bg-slate-950 p-3"><div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500"><span>Reconstructed output</span><span className="text-emerald-300">{reconstructionLevel === "full" ? "MICRO-REGION MEAN" : reconstructionLevel.toUpperCase()}</span></div>{reconstructionUrl ? <div className="overflow-hidden rounded border border-white/8 bg-black"><img src={reconstructionUrl} alt="Hierarchically reconstructed image" className="max-h-[480px] w-full object-contain" /></div> : <div className="relative grid h-72 place-items-center overflow-hidden rounded border border-dashed border-emerald-300/15 bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.07),transparent_42%)] text-center"><div className="absolute grid h-32 w-44 grid-cols-4 gap-1 opacity-35">{Array.from({ length: 16 }).map((_, index) => <span key={index} className="rounded-sm border border-emerald-300/30" style={{ transform: `translate(${(index % 3) - 1}px, ${Math.floor(index / 4) % 2 ? 2 : -2}px)` }} />)}</div><div className="relative"><Network className="mx-auto mb-3 h-8 w-8 text-emerald-500/60" /><p className="text-sm font-medium text-slate-400">Decode a region hierarchy to inspect fidelity.</p><p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-600">Regions → mean appearance → PNG / SVG</p></div></div>}</div>
-            </div>
+            </div>}
           </section>
 
           <section className="grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
