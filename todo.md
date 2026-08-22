@@ -174,7 +174,7 @@
 - [x] Preserve true-stall and finite processing-budget protection with stage-aware liveness handling and clear safe failure messages.
 - [x] Add engine, lifecycle, UI, local-smoke, and published-smoke regressions for long hierarchy work and silent-engine failures.
 - [x] Validate, document, checkpoint, synchronize, and deliver the full-fidelity analysis-liveness repair.
-- [ ] Emit an early public-safe Python bootstrap progress event and add a bounded pre-first-progress liveness phase.
-- [ ] Preserve finite normal/advanced budgets and post-bootstrap true-stall protection with clear last-stage failure reporting.
-- [ ] Freeze terminal elapsed time in the workbench and add startup/liveness/UI/integration/smoke regressions.
-- [ ] Validate, document, checkpoint, synchronize, and deliver the initialization-liveness reliability repair.
+- [x] Emit an early public-safe Python bootstrap progress event and add a bounded pre-first-progress liveness phase.
+- [x] Preserve finite normal/advanced budgets and post-bootstrap true-stall protection with clear last-stage failure reporting.
+- [x] Freeze terminal elapsed time in the workbench and add startup/liveness/UI/integration/smoke regressions.
+- [x] Validate, document, checkpoint, synchronize, and deliver the initialization-liveness reliability repair.
