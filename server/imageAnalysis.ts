@@ -226,6 +226,11 @@ function advancedEtaFor(config: Pick<AnalysisConfig, "runParameterSensitivity" |
   return { minimumRemainingMs: clampInteger(conservative * 0.3, 5_000, remainingBudgetMs), maximumRemainingMs: clampInteger(conservative, 5_000, remainingBudgetMs), basis: "advanced_budget" };
 }
 
+function completedJobSnapshot(job: AnalysisJobStatus, now: number): AnalysisJobStatus {
+  const stages = (job.timing?.stages ?? []).map(entry => entry.endedAt === null ? { ...entry, endedAt: now, durationMs: Math.max(0, now - entry.startedAt) } : entry);
+  return { ...job, status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, expiresAt: now + DEFAULT_RESULT_TTL_MS, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1", totalElapsedMs: Math.max(0, now - job.createdAt), stages, advancedEta: null } };
+}
+
 export class AnalysisAdmissionError extends Error {
   readonly code = "TOO_MANY_REQUESTS";
 }
@@ -415,7 +420,8 @@ export class AnalysisJobStore {
   }
 
   private completedSnapshot(job: AnalysisJobStatus, now: number): AnalysisJobStatus {
-    return { ...job, status: "completed" as const, stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, expiresAt: now + this.ttlMs, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null } };
+    const snapshot = completedJobSnapshot(job, now);
+    return { ...snapshot, expiresAt: now + this.ttlMs };
   }
 
   private snapshot(job: AnalysisJobStatus, now: number): AnalysisJobStatus {
@@ -640,7 +646,7 @@ export async function analyzeImage(input: {
   mimeType: string;
   dataBase64: string;
   config: AnalysisConfig;
-}, ownerId = "direct", admissionKey = `direct:${ownerId}`, run?: { jobId?: string; onProgress?: (event: AnalysisProgressEvent) => void; admissionReserved?: boolean }): Promise<AnalysisResult> {
+}, ownerId = "direct", admissionKey = `direct:${ownerId}`, run?: { jobId?: string; onProgress?: (event: AnalysisProgressEvent) => void; completedSnapshot?: () => AnalysisJobStatus | null; admissionReserved?: boolean }): Promise<AnalysisResult> {
   run?.onProgress?.({ status: "running", stage: "validating_input", percent: 1, message: "Validating the uploaded image and configured limits." });
   const { extension, data } = preflightAnalysisInput(input);
 
@@ -706,7 +712,7 @@ export async function analyzeImage(input: {
       errors,
     };
       run?.onProgress?.({ status: "uploading", stage: "finalizing", percent: 99, message: "Finalizing owner-scoped analysis results." });
-      const completedJob = run?.jobId ? activeJobs.previewCompletion(run.jobId) : null;
+      const completedJob = run?.completedSnapshot?.() ?? (run?.jobId ? activeJobs.previewCompletion(run.jobId) : null);
       if (completedJob?.timing) {
         representation.executionTiming = {
           schema: "AnalysisExecutionTiming@1",
@@ -791,8 +797,10 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
     activeJobs.fail(jobId, error instanceof Error ? error.message : "Analysis could not be scheduled.");
     throw error;
   }
-  void analyzeImage(input, ownerId, admissionKey, { jobId, admissionReserved: true, onProgress: update => {
+  let latestJob: AnalysisJobStatus = job;
+  void analyzeImage(input, ownerId, admissionKey, { jobId, admissionReserved: true, completedSnapshot: () => activeJobs.previewCompletion(jobId) ?? completedJobSnapshot(latestJob, Date.now()), onProgress: update => {
     const currentJob = activeJobs.update(jobId, update);
+    if (currentJob) latestJob = currentJob;
     const status = update.status === "running" || update.status === "uploading" ? update.status : "queued";
     void saveAnalysisManifest({ jobId, ownerId, status, expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), progressSnapshot: currentJob ? JSON.stringify(currentJob) : null }).catch(() => undefined);
   } })
