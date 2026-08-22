@@ -24,6 +24,8 @@ After the domain was reattached, a fresh public response did include the current
 
 Directly importing the public entry module in the browser returned `TypeError: Cannot read properties of undefined (reading 'createContext')`. The Rollup manual chunk layout was providing no usable React **default** export to modules that imported `React` as a default namespace. The initial theme provider therefore failed before React could mount. The repair replaces these default imports with the React module namespace plus named hooks and `Suspense`/`lazy` exports in the active workbench and its deferred modules. Local preview, type checking, all 46 JavaScript tests, and a fresh production build now pass with the repaired module graph.
 
+The final build correction also removes the React-only manual chunk boundary that created the faulty interop path. Deferred execution timeline, result inspection studio, timing-history exporter, data-client, UI-primitives, icon, and vendor bundles remain split; React now remains with its compatible package graph in the vendor bundle. This trades a separately cacheable React runtime for a reliable public bootstrap.
+
 ## Immediate next diagnostic steps
 
 The deployed HTML and production asset routing need inspection to determine whether the entry module is missing, blocked, or failing before console capture. The implementation will add a safe first-paint fallback and module-level recovery so the workbench cannot silently collapse to an empty page.
