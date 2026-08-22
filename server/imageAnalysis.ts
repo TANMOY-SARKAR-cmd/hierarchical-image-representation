@@ -811,7 +811,7 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
     throw error;
   }
   let latestJob: AnalysisJobStatus = job;
-  void analyzeImage(input, ownerId, admissionKey, { jobId, admissionReserved: true, completedSnapshot: () => activeJobs.previewCompletion(jobId) ?? completedJobSnapshot(latestJob, Date.now()), onProgress: update => {
+  void analyzeImage(input, ownerId, admissionKey, { jobId, admissionReserved: true, completedSnapshot: () => completedJobSnapshot(latestJob, Date.now()), onProgress: update => {
     const currentJob = activeJobs.update(jobId, update);
     if (currentJob) latestJob = currentJob;
     const status = update.status === "running" || update.status === "uploading" ? update.status : "queued";
