@@ -100,9 +100,11 @@ type Representation = {
   executionTiming?: { schema: string; totalDurationMs: number; stages: AnalysisStageTiming[]; interpretation: string };
 };
 type CacheRetentionTelemetry = { scope: "process_local_aggregate"; activeEntries: number; capacity: number; ttlMs: number; fillRatio: number; writes: number; lookups: number; hits: number; misses: number; hitRate: number; expiredEvictions: number; capacityEvictions: number; totalEvictions: number; processStartedAt: number; lastActivityAt: number | null };
-type AnalysisStageTiming = { stage: string; label: string; startedAt: number; endedAt: number | null; durationMs: number };
+type AnalysisStageTiming = { stage: string; label: string; startedAt: number; endedAt: number | null; durationMs: number; messages?: Array<{ message: string; at: number; offsetMs: number }> };
 type AdvancedEtaRange = { minimumRemainingMs: number; maximumRemainingMs: number; basis: "advanced_budget" | "observed_progress" | "sensitivity_variant" };
 type AnalysisJobStatus = { jobId: string; status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled" | "expired"; stage: string; percent: number; message: string; createdAt: number; updatedAt: number; completedAt: number | null; expiresAt: number; error: string | null; resultAvailable: boolean; timing?: { schema: string; totalElapsedMs: number; stages: AnalysisStageTiming[]; advancedEta: AdvancedEtaRange | null } };
+
+const DeferredExecutionTimeline = React.lazy(() => import("./ExecutionTimeline"));
 
 const overlays = [
   { id: "none", label: "Native source" },
@@ -141,6 +143,11 @@ function formatDuration(valueMs: number) {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+function etaVisualRange(elapsedMs: number, eta: AdvancedEtaRange) {
+  const percentFor = (remainingMs: number) => Math.min(97, Math.max(0, Math.round((elapsedMs / Math.max(elapsedMs + remainingMs, 1)) * 100)));
+  return { conservative: percentFor(eta.maximumRemainingMs), optimistic: percentFor(eta.minimumRemainingMs) };
+}
+
 export function AnalysisProgressPanel({ job }: { job: AnalysisJobStatus | null | undefined }) {
   const [now, setNow] = useState(() => Date.now());
   const terminal = job?.status === "completed" || job?.status === "failed" || job?.status === "cancelled" || job?.status === "expired";
@@ -152,22 +159,14 @@ export function AnalysisProgressPanel({ job }: { job: AnalysisJobStatus | null |
   if (!job) return null;
   const elapsedSeconds = Math.max(0, Math.floor((now - job.createdAt) / 1000));
   const advancedEta = terminal ? null : job.timing?.advancedEta;
+  const etaVisual = advancedEta ? etaVisualRange(Math.max(0, now - job.createdAt), advancedEta) : null;
   return <section className={cn("rounded-xl border p-4", job.status === "failed" ? "border-rose-300/30 bg-rose-300/[0.04]" : "border-cyan-300/25 bg-cyan-300/[0.045]")} aria-live="polite">
     <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-cyan-200">{terminal ? "Analysis status" : "Server-side analysis"}</p><h2 className="mt-1 text-sm font-semibold text-slate-100">{job.stage.replace(/_/g, " ")}</h2></div><span className="font-mono text-lg font-semibold text-cyan-100">{job.percent}%</span></div>
     <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-950/80" role="progressbar" aria-label="Analysis progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={job.percent}><div className={cn("h-full rounded-full transition-[width] duration-300", job.status === "failed" ? "bg-rose-300" : "bg-cyan-300")} style={{ width: `${job.percent}%` }} /></div>
-    <p className="mt-3 text-xs leading-relaxed text-slate-300">{job.error ?? job.message}</p><p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-slate-500">{elapsedSeconds}s elapsed · {job.status}</p>{advancedEta ? <p className="mt-2 rounded border border-violet-300/25 bg-violet-300/[0.06] px-2 py-1.5 font-mono text-[10px] text-violet-100">Advanced ETA: ~{formatDuration(advancedEta.minimumRemainingMs)}–{formatDuration(advancedEta.maximumRemainingMs)} remaining <span className="text-violet-200/65">· operational range</span></p> : null}{job.stage === "sensitivity" ? <p className="mt-2 rounded border border-violet-300/20 bg-violet-300/[0.05] p-2 text-[10px] leading-relaxed text-violet-100">The optional sensitivity study is running additional deterministic variants. Your primary reconstruction settings are unchanged.</p> : null}{job.resultAvailable ? <p className="mt-2 rounded border border-cyan-300/15 bg-black/15 p-2 text-[10px] leading-relaxed text-slate-400">Available only in this browser until <span className="font-mono text-cyan-100">{new Date(job.expiresAt).toLocaleTimeString()}</span>. Discard revokes workbench access; it is not a physical storage-deletion claim.</p> : null}
+    <p className="mt-3 text-xs leading-relaxed text-slate-300">{job.error ?? job.message}</p><p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-slate-500">{elapsedSeconds}s elapsed · {job.status}</p>{advancedEta && etaVisual ? <div className="mt-2 rounded border border-violet-300/25 bg-violet-300/[0.06] px-2 py-1.5"><p className="font-mono text-[10px] text-violet-100">Advanced ETA: ~{formatDuration(advancedEta.minimumRemainingMs)}–{formatDuration(advancedEta.maximumRemainingMs)} remaining <span className="text-violet-200/65">· operational range</span></p><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-950/90" role="progressbar" aria-label="Advanced ETA range progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={etaVisual.conservative} aria-valuetext={`Estimated progress range ${etaVisual.conservative}% to ${etaVisual.optimistic}%`}><div className="relative h-full bg-violet-300/35" style={{ width: `${Math.max(3, etaVisual.optimistic)}%` }}><div className="absolute inset-y-0 left-0 bg-violet-200" style={{ width: `${etaVisual.optimistic ? (etaVisual.conservative / etaVisual.optimistic) * 100 : 0}%` }} /></div></div><div className="mt-1 flex justify-between font-mono text-[8px] uppercase tracking-wider text-violet-200/60"><span>ETA visual</span><span>{etaVisual.conservative}–{etaVisual.optimistic}% of estimate</span></div></div> : null}{job.stage === "sensitivity" ? <p className="mt-2 rounded border border-violet-300/20 bg-violet-300/[0.05] p-2 text-[10px] leading-relaxed text-violet-100">The optional sensitivity study is running additional deterministic variants. Your primary reconstruction settings are unchanged.</p> : null}{job.resultAvailable ? <p className="mt-2 rounded border border-cyan-300/15 bg-black/15 p-2 text-[10px] leading-relaxed text-slate-400">Available only in this browser until <span className="font-mono text-cyan-100">{new Date(job.expiresAt).toLocaleTimeString()}</span>. Discard revokes workbench access; it is not a physical storage-deletion claim.</p> : null}
   </section>;
 }
 
-function ExecutionTimeline({ timing }: { timing: Representation["executionTiming"] | undefined }) {
-  if (!timing?.stages.length) return null;
-  const maximumDuration = Math.max(1, ...timing.stages.map(stage => stage.durationMs));
-  return <section className="rounded-xl border border-violet-300/20 bg-violet-300/[0.035] p-4" aria-labelledby="execution-timeline-title">
-    <h2 id="execution-timeline-title" className="mb-1 flex items-center gap-2 text-sm font-semibold text-violet-100"><Timer className="h-4 w-4 text-violet-300" /><span>Execution timeline</span></h2>
-    <p className="text-[11px] leading-relaxed text-slate-400">Total server-observed time <span className="font-mono text-violet-100">{formatDuration(timing.totalDurationMs)}</span>. Includes orchestration and artifact work; it is not a performance guarantee.</p>
-    <ol className="mt-3 space-y-2" aria-label="Analysis stage durations">{timing.stages.map((stage, index) => <li key={`${stage.stage}-${stage.startedAt}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded border border-white/8 bg-black/20 px-2.5 py-2"><div className="min-w-0"><div className="flex items-center justify-between gap-2"><span className="truncate text-xs text-slate-200">{stage.label}</span><span className="font-mono text-[9px] text-slate-600">{index + 1}</span></div><div className="mt-1 h-1 overflow-hidden rounded bg-slate-950"><div className="h-full rounded bg-violet-300/75" style={{ width: `${Math.max(3, Math.round((stage.durationMs / maximumDuration) * 100))}%` }} /></div></div><span className="font-mono text-[10px] text-violet-100">{formatDuration(stage.durationMs)}</span></li>)}</ol>
-  </section>;
-}
 
 function ImageComparisonSlider({ sourceUrl, reconstructionUrl, position, onPositionChange, width, height, reconstructionLabel }: { sourceUrl: string; reconstructionUrl: string; position: number; onPositionChange: (value: number) => void; width: number; height: number; reconstructionLabel: string }) {
   return <div className="rounded border border-white/8 bg-black p-2">
@@ -639,7 +638,7 @@ export default function Home() {
           <AnalysisProgressPanel job={jobStatus} />
           {hasCompletedResult ? <section className="rounded-xl border border-amber-300/20 bg-amber-300/[0.035] p-4"><div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-amber-100">Result availability</h2><p className="mt-1 text-[11px] leading-relaxed text-slate-400">Discard immediately revokes this browser’s workbench access and clears cached result references. It does not promise physical deletion from managed platform storage.</p></div><Button type="button" variant="outline" size="sm" onClick={discardAnalysis} disabled={discardMutation.isPending} className="shrink-0 border-amber-300/30 text-amber-100 hover:bg-amber-300/10">Discard access</Button></div></section> : null}
 
-          {hasCompletedResult ? <ExecutionTimeline timing={representation?.executionTiming} /> : null}
+          {hasCompletedResult ? <React.Suspense fallback={<div role="status" className="rounded-xl border border-violet-300/15 bg-violet-300/[0.03] p-4 text-xs text-violet-100">Loading private execution timeline…</div>}><DeferredExecutionTimeline timing={representation?.executionTiming} /></React.Suspense> : null}
           {hasCompletedResult ? <><section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100"><Layers3 className="h-4 w-4 text-cyan-300" /> Feature overlay</div>
             <div className="space-y-1">

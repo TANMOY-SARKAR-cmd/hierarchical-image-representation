@@ -56,12 +56,15 @@ describe("durable analysis lifecycle guard", () => {
 
     expect(active?.timing?.stages.map(stage => stage.stage)).toEqual(["queued", "feature_extraction", "sensitivity"]);
     expect(active?.timing?.stages.at(-1)?.durationMs).toBe(6_000);
+    expect(active?.timing?.stages.at(-1)?.messages?.map(entry => entry.message)).toEqual(["Sensitivity study: variant 2 of 5 (finer partition).", "Sensitivity study: variant 2 of 5 (finer partition) — reconstruction."]);
+    expect(active?.timing?.stages.at(-1)?.messages?.map(entry => entry.offsetMs)).toEqual([0, 6_000]);
     expect(active?.timing?.advancedEta).toMatchObject({ basis: "sensitivity_variant" });
     expect(active?.timing?.advancedEta?.minimumRemainingMs).toBeLessThanOrEqual(active?.timing?.advancedEta?.maximumRemainingMs ?? 0);
 
     const completed = store.complete("timed-advanced", 20_000);
     expect(completed?.timing?.advancedEta).toBeNull();
     expect(completed?.timing?.stages.at(-1)).toMatchObject({ stage: "sensitivity", endedAt: 20_000, durationMs: 13_000 });
+    expect(completed?.timing?.stages.at(-1)?.messages).toHaveLength(2);
   });
 
   it("omits ETA ranges from normal primary analyses", () => {

@@ -89,6 +89,7 @@ export type AnalysisStageTiming = {
   startedAt: number;
   endedAt: number | null;
   durationMs: number;
+  messages?: Array<{ message: string; at: number; offsetMs: number }>;
 };
 
 export type AdvancedEtaRange = {
@@ -153,6 +154,7 @@ const DEFAULT_SENSITIVITY_VARIANT_TIMEOUT_MS = 60 * 1000;
 const DEFAULT_MAX_ADVANCED_PROCESS_TIMEOUT_MS = 7 * 60 * 1000;
 const ERROR_HEATMAP_REFERENCE_DELTA = 32;
 const MAX_THRESHOLD_HEATMAPS = 96;
+const MAX_STAGE_MESSAGES = 8;
 const decodedErrorEvidence = new Map<string, { width: number; height: number; values: Uint16Array }>();
 const thresholdedHeatmapUrls = new Map<string, string>();
 const activeProcesses = new Map<string, ReturnType<typeof spawn>>();
@@ -195,6 +197,17 @@ const stageLabels: Record<string, string> = {
 
 function stageLabel(stage: string) {
   return stageLabels[stage] ?? stage.replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function safeStageMessage(message: string) {
+  return message.trim().replace(/\s+/g, " ").slice(0, 280);
+}
+
+function appendStageMessage(stage: AnalysisStageTiming, message: string, now: number): AnalysisStageTiming {
+  const normalized = safeStageMessage(message);
+  if (!normalized || stage.messages?.some(entry => entry.message === normalized)) return stage;
+  const messages = [...(stage.messages ?? []), { message: normalized, at: now, offsetMs: Math.max(0, now - stage.startedAt) }].slice(-MAX_STAGE_MESSAGES);
+  return { ...stage, messages };
 }
 
 function terminalStatus(status: AnalysisJobStatus["status"]) {
@@ -356,7 +369,7 @@ export class AnalysisJobStore {
   create(jobId: string, ownerId: string, now = Date.now(), config?: Pick<AnalysisConfig, "runParameterSensitivity" | "sensitivityVariantLimit">) {
     this.purge(now);
     if (config) this.configs.set(jobId, config);
-    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, expiresAt: now + this.ttlMs, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 0, stages: [{ stage: "queued", label: stageLabel("queued"), startedAt: now, endedAt: null, durationMs: 0 }], advancedEta: null } };
+    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, expiresAt: now + this.ttlMs, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 0, stages: [{ stage: "queued", label: stageLabel("queued"), startedAt: now, endedAt: null, durationMs: 0, messages: [{ message: "Queued for secure server-side analysis.", at: now, offsetMs: 0 }] }], advancedEta: null } };
     this.jobs.set(jobId, job);
     return this.snapshot(job, now);
   }
@@ -367,8 +380,8 @@ export class AnalysisJobStore {
     const existingStages = job.timing?.stages ?? [];
     const currentStage = existingStages.at(-1);
     const stages = currentStage?.stage === update.stage
-      ? existingStages
-      : [...this.closeOpenStages(existingStages, now), { stage: update.stage, label: stageLabel(update.stage), startedAt: now, endedAt: null, durationMs: 0 }];
+      ? [...existingStages.slice(0, -1), appendStageMessage(currentStage, update.message, now)]
+      : [...this.closeOpenStages(existingStages, now), { stage: update.stage, label: stageLabel(update.stage), startedAt: now, endedAt: null, durationMs: 0, messages: [{ message: safeStageMessage(update.message), at: now, offsetMs: 0 }] }];
     const next = { ...job, ...update, percent: Math.max(job.percent, Math.min(99, Math.round(update.percent))), updatedAt: now, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages, advancedEta: null } };
     this.jobs.set(jobId, next);
     return this.snapshot(next, now);

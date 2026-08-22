@@ -158,3 +158,8 @@
 - [x] Add a compact advanced ETA and completed per-stage execution timeline to the responsive workbench.
 - [x] Add local and deployed ETA/timeline, restoration, revocation, cancellation, and interface regressions.
 - [x] Validate, document, checkpoint, synchronize, and deliver the timing visibility release.
+- [ ] Persist bounded public-safe stage progress messages for expandable private execution timeline details.
+- [ ] Add a distinct ETA-range-driven visual progress band while preserving the truthful server percentage bar.
+- [ ] Defer result-only inspection panels and split durable vendor/application bundles without delaying first-use analysis controls.
+- [ ] Add local and deployed regressions for ETA visualization, expandable stage detail, lazy inspectors, and build chunking.
+- [ ] Validate, document, checkpoint, synchronize, and deliver the ETA visual-progress and bundle-splitting release.

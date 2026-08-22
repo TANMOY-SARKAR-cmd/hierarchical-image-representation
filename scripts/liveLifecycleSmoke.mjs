@@ -138,7 +138,12 @@ try {
     throw new Error("Completed result did not return a valid server-observed execution timeline.");
   }
   if (runSensitivity && !executionTiming.stages.some(stage => stage.stage === "sensitivity")) throw new Error("The advanced timeline did not retain its sensitivity stage.");
-  summary.verification.push("execution timeline");
+  summary.failedAt = "stage-message metadata";
+  const stageMessageCount = executionTiming.stages.reduce((count, stage) => count + (Array.isArray(stage.messages) ? stage.messages.length : 0), 0);
+  if (!stageMessageCount || executionTiming.stages.some(stage => Array.isArray(stage.messages) && stage.messages.some(entry => typeof entry.message !== "string" || !Number.isFinite(entry.offsetMs) || entry.offsetMs < 0))) {
+    throw new Error("Completed timing evidence did not return valid bounded stage-message metadata.");
+  }
+  summary.verification.push("execution timeline", "stage-message metadata");
   const entities = Array.isArray(result.representation?.entities) ? result.representation.entities : [];
   const firstEntity = entities[0];
   const mode = "constant";
