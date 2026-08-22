@@ -154,3 +154,7 @@
 - [x] Improve first-use advanced-study messaging, live status wording, and retry recovery after retryable analysis failures.
 - [x] Add local and deployed five-variant sensitivity completion, liveness, cancellation, and retry regressions.
 - [x] Validate, document, checkpoint, synchronize, and deliver the advanced-analysis completion reliability release.
+- [ ] Persist privacy-safe live stage timing snapshots and bounded advanced ETA ranges across the owner-scoped analysis lifecycle.
+- [ ] Add a compact advanced ETA and completed per-stage execution timeline to the responsive workbench.
+- [ ] Add local and deployed ETA/timeline, restoration, revocation, cancellation, and interface regressions.
+- [ ] Validate, document, checkpoint, synchronize, and deliver the timing visibility release.

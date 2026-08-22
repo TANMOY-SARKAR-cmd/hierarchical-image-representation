@@ -100,6 +100,7 @@ export type PersistedAnalysisManifest = {
   revocationReason?: "discarded" | "expired" | null;
   error?: string | null;
   payload?: string | null;
+  progressSnapshot?: string | null;
 };
 
 export async function saveAnalysisManifest(manifest: PersistedAnalysisManifest): Promise<void> {
@@ -116,6 +117,7 @@ export async function saveAnalysisManifest(manifest: PersistedAnalysisManifest):
       revocationReason: manifest.revocationReason ?? null,
       error: manifest.error ?? null,
       payload: manifest.payload ?? null,
+      progressSnapshot: manifest.progressSnapshot ?? null,
     },
   });
 }
@@ -141,6 +143,7 @@ async function revokeAnalysisManifest(jobId: string, ownerId: string, reason: "d
   const result = await db.update(analysisManifests).set({
     status: reason,
     payload: null,
+    progressSnapshot: null,
     discardedAt: reason === "discarded" ? now : null,
     revokedAt: now,
     revocationReason: reason,

@@ -129,6 +129,13 @@ describe("Hierarchy workbench UI", () => {
     expect(view.getByText(/primary reconstruction settings are unchanged/i)).toBeInTheDocument();
   });
 
+  it("shows a bounded compact ETA range only for an active advanced study", () => {
+    const now = Date.now();
+    const view = render(<AnalysisProgressPanel job={{ jobId: "job-1", status: "running", stage: "sensitivity", percent: 91, message: "Sensitivity study: variant 3 of 5 (conservative merges) — reconstruction.", createdAt: now - 12_000, updatedAt: now, completedAt: null, expiresAt: now + 1_800_000, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 12_000, stages: [], advancedEta: { minimumRemainingMs: 25_000, maximumRemainingMs: 55_000, basis: "sensitivity_variant" } } }} />);
+    expect(view.getByText(/Advanced ETA: ~25s–55s remaining/i)).toBeInTheDocument();
+    expect(view.getByText(/operational range/i)).toBeInTheDocument();
+  });
+
   it("shows the five-variant duration guidance and retries the selected file after a terminal failure", async () => {
     startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
     jobStatusQuery.data = { jobId: "job-1", status: "failed", stage: "failed", percent: 89, message: "Analysis did not complete.", createdAt: Date.now() - 10_000, updatedAt: Date.now(), completedAt: Date.now(), expiresAt: Date.now() + 1_800_000, error: "The advanced sensitivity study exceeded its bounded processing time.", resultAvailable: false };
@@ -191,6 +198,22 @@ describe("Hierarchy workbench UI", () => {
     expect(view.getByText(/not a physical storage-deletion claim/i)).toBeInTheDocument();
     fireEvent.click(discard);
     await waitFor(() => expect(discardMutation.mutateAsync).toHaveBeenCalledWith({ jobId: "job-1" }));
+  });
+
+  it("renders exact completed stage durations as a private execution timeline", async () => {
+    startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
+    const now = Date.now();
+    jobStatusQuery.data = { jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: now - 18_000, updatedAt: now, completedAt: now, expiresAt: now + 1_800_000, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 18_000, stages: [{ stage: "feature_extraction", label: "Feature extraction", startedAt: now - 18_000, endedAt: now - 11_000, durationMs: 7_000 }, { stage: "sensitivity", label: "Sensitivity study", startedAt: now - 11_000, endedAt: now, durationMs: 11_000 }], advancedEta: null } };
+    resultQuery.data = { ...completedResult, jobId: "job-1", representation: { ...completedResult.representation, executionTiming: { schema: "AnalysisExecutionTiming@1", totalDurationMs: 18_000, stages: [{ stage: "feature_extraction", label: "Feature extraction", startedAt: now - 18_000, endedAt: now - 11_000, durationMs: 7_000 }, { stage: "sensitivity", label: "Sensitivity study", startedAt: now - 11_000, endedAt: now, durationMs: 11_000 }], interpretation: "Server-observed orchestration timing." } } };
+    const view = render(<Home />);
+    fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
+    fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
+    await view.findByRole("heading", { name: "Execution timeline" });
+    expect(view.getByText(/Total server-observed time/i)).toBeInTheDocument();
+    expect(view.getAllByText("18s").length).toBeGreaterThan(0);
+    expect(view.getByText("Feature extraction")).toBeInTheDocument();
+    expect(view.getByText("Sensitivity study")).toBeInTheDocument();
+    expect(view.getByLabelText("Analysis stage durations")).toBeInTheDocument();
   });
 
   it("renders duplicate-endpoint relationships without a React duplicate-key warning", async () => {

@@ -36,6 +36,7 @@ export const analysisManifests = mysqlTable("analysisManifests", {
   revocationReason: varchar("revocationReason", { length: 32 }),
   error: text("error"),
   payload: mediumtext("payload"),
+  progressSnapshot: mediumtext("progressSnapshot"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

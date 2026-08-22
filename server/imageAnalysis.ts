@@ -83,6 +83,27 @@ export type AnalysisResult = {
   errorEvidence?: Record<string, { key: string; width: number; height: number }>;
 };
 
+export type AnalysisStageTiming = {
+  stage: string;
+  label: string;
+  startedAt: number;
+  endedAt: number | null;
+  durationMs: number;
+};
+
+export type AdvancedEtaRange = {
+  minimumRemainingMs: number;
+  maximumRemainingMs: number;
+  basis: "advanced_budget" | "observed_progress" | "sensitivity_variant";
+};
+
+export type AnalysisTimingSnapshot = {
+  schema: "AnalysisTiming@1";
+  totalElapsedMs: number;
+  stages: AnalysisStageTiming[];
+  advancedEta: AdvancedEtaRange | null;
+};
+
 export type AnalysisJobStatus = {
   jobId: string;
   ownerId: string;
@@ -96,6 +117,7 @@ export type AnalysisJobStatus = {
   expiresAt: number;
   error: string | null;
   resultAvailable: boolean;
+  timing?: AnalysisTimingSnapshot;
 };
 
 type AnalysisProgressEvent = Pick<AnalysisJobStatus, "status" | "stage" | "percent" | "message">;
@@ -154,6 +176,54 @@ function processingLimitMessage(config: AnalysisConfig) {
   return config.runParameterSensitivity
     ? "The advanced sensitivity study exceeded its bounded processing time. You can retry the same analysis or run only the primary analysis."
     : "The analysis exceeded the processing limit. Please retry with the same image or a smaller image.";
+}
+
+const stageLabels: Record<string, string> = {
+  queued: "Queued",
+  validating_input: "Input validation",
+  feature_extraction: "Feature extraction",
+  segmentation: "Segmentation",
+  merge_tree: "Energy merge tree",
+  cross_scale: "Cross-scale correspondence",
+  reconstruction: "Reconstruction",
+  sensitivity: "Sensitivity study",
+  serialization: "Representation export",
+  analysis_complete: "Engine completion",
+  uploading_artifacts: "Artifact upload",
+  finalizing: "Finalization",
+};
+
+function stageLabel(stage: string) {
+  return stageLabels[stage] ?? stage.replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function terminalStatus(status: AnalysisJobStatus["status"]) {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "expired";
+}
+
+function clampInteger(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, Math.round(value)));
+}
+
+function advancedEtaFor(config: Pick<AnalysisConfig, "runParameterSensitivity" | "sensitivityVariantLimit"> | undefined, job: AnalysisJobStatus, now: number): AdvancedEtaRange | null {
+  if (!config?.runParameterSensitivity || terminalStatus(job.status)) return null;
+  const elapsedMs = Math.max(0, now - job.createdAt);
+  const remainingBudgetMs = Math.max(0, processTimeoutFor(config) - elapsedMs);
+  if (!remainingBudgetMs) return null;
+  const variantBudgetMs = positiveInteger(process.env.ANALYSIS_SENSITIVITY_VARIANT_TIMEOUT_MS, DEFAULT_SENSITIVITY_VARIANT_TIMEOUT_MS);
+  if (job.stage === "sensitivity") {
+    const match = /variant\s+(\d+)\s+of\s+(\d+)/i.exec(job.message);
+    const total = Math.max(1, Math.min(5, Number(match?.[2] ?? config.sensitivityVariantLimit)));
+    const current = Math.max(1, Math.min(total, Number(match?.[1] ?? 1)));
+    const projected = Math.min(remainingBudgetMs, Math.max(15_000, (total - current + 1) * variantBudgetMs));
+    return { minimumRemainingMs: clampInteger(projected * 0.35, 5_000, remainingBudgetMs), maximumRemainingMs: clampInteger(projected, 5_000, remainingBudgetMs), basis: "sensitivity_variant" };
+  }
+  if (job.percent >= 10) {
+    const projected = Math.min(remainingBudgetMs, Math.max(15_000, elapsedMs * ((100 - job.percent) / Math.max(job.percent, 1))));
+    return { minimumRemainingMs: clampInteger(projected * 0.6, 5_000, remainingBudgetMs), maximumRemainingMs: clampInteger(projected * 1.45, 5_000, remainingBudgetMs), basis: "observed_progress" };
+  }
+  const conservative = Math.min(remainingBudgetMs, Math.max(30_000, variantBudgetMs * Math.max(1, config.sensitivityVariantLimit)));
+  return { minimumRemainingMs: clampInteger(conservative * 0.3, 5_000, remainingBudgetMs), maximumRemainingMs: clampInteger(conservative, 5_000, remainingBudgetMs), basis: "advanced_budget" };
 }
 
 export class AnalysisAdmissionError extends Error {
@@ -274,59 +344,88 @@ export class AnalysisResultCache {
 
 export class AnalysisJobStore {
   private readonly jobs = new Map<string, AnalysisJobStatus>();
+  private readonly configs = new Map<string, Pick<AnalysisConfig, "runParameterSensitivity" | "sensitivityVariantLimit">>();
 
   constructor(private readonly ttlMs: number) {}
 
-  create(jobId: string, ownerId: string, now = Date.now()) {
+  create(jobId: string, ownerId: string, now = Date.now(), config?: Pick<AnalysisConfig, "runParameterSensitivity" | "sensitivityVariantLimit">) {
     this.purge(now);
-    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, expiresAt: now + this.ttlMs, error: null, resultAvailable: false };
+    if (config) this.configs.set(jobId, config);
+    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, expiresAt: now + this.ttlMs, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 0, stages: [{ stage: "queued", label: stageLabel("queued"), startedAt: now, endedAt: null, durationMs: 0 }], advancedEta: null } };
     this.jobs.set(jobId, job);
-    return job;
+    return this.snapshot(job, now);
   }
 
   update(jobId: string, update: AnalysisProgressEvent, now = Date.now()) {
     const job = this.jobs.get(jobId);
     if (!job || job.status === "completed" || job.status === "failed" || job.status === "cancelled") return null;
-    const next = { ...job, ...update, percent: Math.max(job.percent, Math.min(99, Math.round(update.percent))), updatedAt: now };
+    const existingStages = job.timing?.stages ?? [];
+    const currentStage = existingStages.at(-1);
+    const stages = currentStage?.stage === update.stage
+      ? existingStages
+      : [...this.closeOpenStages(existingStages, now), { stage: update.stage, label: stageLabel(update.stage), startedAt: now, endedAt: null, durationMs: 0 }];
+    const next = { ...job, ...update, percent: Math.max(job.percent, Math.min(99, Math.round(update.percent))), updatedAt: now, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages, advancedEta: null } };
     this.jobs.set(jobId, next);
-    return next;
+    return this.snapshot(next, now);
   }
 
   complete(jobId: string, now = Date.now()) {
     const job = this.jobs.get(jobId);
     if (!job) return null;
-    const next = { ...job, status: "completed" as const, stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, expiresAt: now + this.ttlMs, error: null, resultAvailable: true };
+    if (job.status === "completed") return this.snapshot(job, now);
+    const next = this.completedSnapshot(job, now);
     this.jobs.set(jobId, next);
-    return next;
+    return this.snapshot(next, now);
+  }
+
+  previewCompletion(jobId: string, now = Date.now()) {
+    const job = this.jobs.get(jobId);
+    return job ? this.snapshot(this.completedSnapshot(job, now), now) : null;
   }
 
   fail(jobId: string, error: string, now = Date.now()) {
     const job = this.jobs.get(jobId);
     if (!job) return null;
-    const next = { ...job, status: "failed" as const, stage: "failed", message: "Analysis did not complete.", updatedAt: now, completedAt: now, error, resultAvailable: false };
+    const next = { ...job, status: "failed" as const, stage: "failed", message: "Analysis did not complete.", updatedAt: now, completedAt: now, error, resultAvailable: false, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null } };
     this.jobs.set(jobId, next);
-    return next;
+    return this.snapshot(next, now);
   }
 
   cancel(jobId: string, now = Date.now()) {
     const job = this.jobs.get(jobId);
     if (!job || job.status === "completed" || job.status === "failed" || job.status === "cancelled") return null;
-    const next = { ...job, status: "cancelled" as const, stage: "cancelled", message: "Analysis was cancelled before completion.", updatedAt: now, completedAt: now, error: null, resultAvailable: false };
+    const next = { ...job, status: "cancelled" as const, stage: "cancelled", message: "Analysis was cancelled before completion.", updatedAt: now, completedAt: now, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null } };
     this.jobs.set(jobId, next);
-    return next;
+    return this.snapshot(next, now);
   }
 
   get(jobId: string, now = Date.now()) {
     this.purge(now);
-    return this.jobs.get(jobId) ?? null;
+    const job = this.jobs.get(jobId);
+    return job ? this.snapshot(job, now) : null;
   }
 
   remove(jobId: string) {
     this.jobs.delete(jobId);
+    this.configs.delete(jobId);
+  }
+
+  private closeOpenStages(stages: AnalysisStageTiming[], now: number) {
+    return stages.map(entry => entry.endedAt === null ? { ...entry, endedAt: now, durationMs: Math.max(0, now - entry.startedAt) } : entry);
+  }
+
+  private completedSnapshot(job: AnalysisJobStatus, now: number): AnalysisJobStatus {
+    return { ...job, status: "completed" as const, stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, expiresAt: now + this.ttlMs, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null } };
+  }
+
+  private snapshot(job: AnalysisJobStatus, now: number): AnalysisJobStatus {
+    const stages = (job.timing?.stages ?? []).map(entry => ({ ...entry, durationMs: entry.endedAt === null ? Math.max(0, now - entry.startedAt) : entry.durationMs }));
+    const timing: AnalysisTimingSnapshot = { schema: "AnalysisTiming@1", totalElapsedMs: Math.max(0, (job.completedAt ?? now) - job.createdAt), stages, advancedEta: advancedEtaFor(this.configs.get(job.jobId), job, now) };
+    return { ...job, timing };
   }
 
   private purge(now: number) {
-    for (const [jobId, job] of Array.from(this.jobs.entries())) if (job.completedAt !== null && now - job.completedAt >= this.ttlMs) this.jobs.delete(jobId);
+    for (const [jobId, job] of Array.from(this.jobs.entries())) if (job.completedAt !== null && now - job.completedAt >= this.ttlMs) this.remove(jobId);
   }
 }
 
@@ -606,10 +705,20 @@ export async function analyzeImage(input: {
       reconstructions,
       errors,
     };
-      const result = { jobId, ownerId, representation, artifactUrls, errorEvidence };
       run?.onProgress?.({ status: "uploading", stage: "finalizing", percent: 99, message: "Finalizing owner-scoped analysis results." });
+      const completedJob = run?.jobId ? activeJobs.previewCompletion(run.jobId) : null;
+      if (completedJob?.timing) {
+        representation.executionTiming = {
+          schema: "AnalysisExecutionTiming@1",
+          totalDurationMs: completedJob.timing.totalElapsedMs,
+          stages: completedJob.timing.stages,
+          interpretation: "Server-observed orchestration timing for this private run, including bridge and artifact work; not a benchmark or performance guarantee.",
+        };
+      }
+      const result = { jobId, ownerId, representation, artifactUrls, errorEvidence };
       activeResults.remember(result);
-      await saveAnalysisManifest({ jobId, ownerId, status: "completed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), payload: JSON.stringify(result) });
+      await saveAnalysisManifest({ jobId, ownerId, status: "completed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), payload: JSON.stringify(result), progressSnapshot: completedJob ? JSON.stringify(completedJob) : null });
+      if (run?.jobId) activeJobs.complete(run.jobId);
       return result;
     } finally {
       await fs.rm(workspace, { recursive: true, force: true });
@@ -673,19 +782,19 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
   preflightAnalysisInput(input);
   submissionAdmission.acquire(admissionKey);
   const jobId = nanoid(14);
-  const job = activeJobs.create(jobId, ownerId);
+  const job = activeJobs.create(jobId, ownerId, Date.now(), input.config);
   console.info(`[ImageAnalysis] Job ${jobId} admitted for server-side analysis.`);
   try {
-    await saveAnalysisManifest({ jobId, ownerId, status: "queued", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS) });
+    await saveAnalysisManifest({ jobId, ownerId, status: "queued", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), progressSnapshot: JSON.stringify(job) });
   } catch (error) {
     submissionAdmission.release();
     activeJobs.fail(jobId, error instanceof Error ? error.message : "Analysis could not be scheduled.");
     throw error;
   }
   void analyzeImage(input, ownerId, admissionKey, { jobId, admissionReserved: true, onProgress: update => {
-    activeJobs.update(jobId, update);
+    const currentJob = activeJobs.update(jobId, update);
     const status = update.status === "running" || update.status === "uploading" ? update.status : "queued";
-    void saveAnalysisManifest({ jobId, ownerId, status, expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS) }).catch(() => undefined);
+    void saveAnalysisManifest({ jobId, ownerId, status, expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), progressSnapshot: currentJob ? JSON.stringify(currentJob) : null }).catch(() => undefined);
   } })
     .then(async () => {
       activeJobs.complete(jobId);
@@ -696,10 +805,9 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
       const safeError = error instanceof AnalysisEngineError
         ? error.message
         : "The analysis could not complete. Please retry with a smaller image or less detail.";
-      if (cancelled) activeJobs.cancel(jobId);
-      else activeJobs.fail(jobId, safeError);
+      const terminalJob = cancelled ? activeJobs.cancel(jobId) : activeJobs.fail(jobId, safeError);
       console.error(`[ImageAnalysis] Job ${jobId} ended ${cancelled ? "cancelled" : "failed"}.`);
-      await saveAnalysisManifest({ jobId, ownerId, status: cancelled ? "cancelled" : "failed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), error: cancelled ? null : safeError }).catch(() => undefined);
+      await saveAnalysisManifest({ jobId, ownerId, status: cancelled ? "cancelled" : "failed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), error: cancelled ? null : safeError, progressSnapshot: terminalJob ? JSON.stringify(terminalJob) : null }).catch(() => undefined);
     });
   return job;
 }
@@ -709,6 +817,23 @@ export async function getAnalysisJob(jobId: string) {
   const manifest = await ensureManifestAccess(jobId);
   if (!manifest) return null;
   if (active && active.ownerId === manifest.ownerId) return active;
+  if (manifest.progressSnapshot) {
+    try {
+      const persisted = JSON.parse(manifest.progressSnapshot) as AnalysisJobStatus;
+      if (persisted.jobId === jobId && persisted.ownerId === manifest.ownerId) {
+        return {
+          ...persisted,
+          status: manifest.status as AnalysisJobStatus["status"],
+          expiresAt: manifest.expiresAt.getTime(),
+          completedAt: manifest.completedAt?.getTime() ?? persisted.completedAt,
+          error: manifest.error ?? persisted.error,
+          resultAvailable: manifest.status === "completed",
+        };
+      }
+    } catch {
+      // A malformed durable progress snapshot is ignored in favor of the safe lifecycle fallback below.
+    }
+  }
   const terminal = manifest.status === "completed" || manifest.status === "failed" || manifest.status === "cancelled";
   return { jobId, ownerId: manifest.ownerId, status: manifest.status as AnalysisJobStatus["status"], stage: manifest.status, percent: manifest.status === "completed" ? 100 : 0, message: terminal ? manifest.status === "completed" ? "Analysis result remains available." : manifest.status === "cancelled" ? "Analysis was cancelled." : "Analysis did not complete." : "Analysis state is being restored.", createdAt: manifest.createdAt.getTime(), updatedAt: manifest.updatedAt.getTime(), completedAt: manifest.completedAt?.getTime() ?? null, expiresAt: manifest.expiresAt.getTime(), error: manifest.error ?? null, resultAvailable: manifest.status === "completed" };
 }
@@ -720,7 +845,7 @@ export async function cancelAnalysisJob(jobId: string, ownerId: string) {
   cancelledJobIds.add(jobId);
   activeProcesses.get(jobId)?.kill("SIGKILL");
   const cancelled = activeJobs.cancel(jobId) ?? { ...job, status: "cancelled" as const, stage: "cancelled", percent: job.percent, message: "Analysis was cancelled before completion.", completedAt: Date.now(), updatedAt: Date.now(), expiresAt: Date.now() + DEFAULT_RESULT_TTL_MS, error: null, resultAvailable: false };
-  await saveAnalysisManifest({ jobId, ownerId, status: "cancelled", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date() }).catch(() => undefined);
+  await saveAnalysisManifest({ jobId, ownerId, status: "cancelled", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), progressSnapshot: JSON.stringify(cancelled) }).catch(() => undefined);
   return cancelled;
 }
 

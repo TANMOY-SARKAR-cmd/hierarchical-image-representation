@@ -63,12 +63,15 @@ async function pollForTerminal(client, jobId) {
   const startedAt = Date.now();
   const observedStatuses = new Set();
   const observedStages = new Set();
+  let advancedEtaObserved = false;
   while (Date.now() - startedAt < timeoutMs) {
     const job = await client.imageAnalysis.status.query({ jobId });
     observedStatuses.add(job.status);
     observedStages.add(job.stage);
+    const eta = job.timing?.advancedEta;
+    if (runSensitivity && eta && Number.isFinite(eta.minimumRemainingMs) && Number.isFinite(eta.maximumRemainingMs) && eta.minimumRemainingMs >= 0 && eta.minimumRemainingMs <= eta.maximumRemainingMs) advancedEtaObserved = true;
     if (job.status === "completed" || job.status === "failed" || job.status === "cancelled" || job.status === "expired") {
-      return { job, elapsedMs: Date.now() - startedAt, observedStatuses: [...observedStatuses], observedStages: [...observedStages] };
+      return { job, elapsedMs: Date.now() - startedAt, observedStatuses: [...observedStatuses], observedStages: [...observedStages], advancedEtaObserved };
     }
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
@@ -98,7 +101,7 @@ const request = {
 
 const client = createAnonymousClient();
 const isolatedClient = createAnonymousClient();
-const summary = { mode: runSensitivity ? "five_variant_sensitivity" : "primary", terminal: "", elapsedMs: 0, observedStatuses: [], observedStages: [], verification: [], failedAt: "startup" };
+const summary = { mode: runSensitivity ? "five_variant_sensitivity" : "primary", terminal: "", elapsedMs: 0, observedStatuses: [], observedStages: [], advancedEtaObserved: false, verification: [], failedAt: "startup" };
 
 try {
   summary.failedAt = "start";
@@ -109,6 +112,7 @@ try {
   summary.elapsedMs = terminal.elapsedMs;
   summary.observedStatuses = terminal.observedStatuses;
   summary.observedStages = terminal.observedStages;
+  summary.advancedEtaObserved = terminal.advancedEtaObserved;
   if (terminal.job.status !== "completed" || !terminal.job.resultAvailable) {
     throw new Error("The live job did not produce an available completed result.");
   }
@@ -120,12 +124,21 @@ try {
   summary.failedAt = "result";
   const result = await client.imageAnalysis.result.query({ jobId: started.jobId });
   if (runSensitivity) {
+    if (!summary.advancedEtaObserved) throw new Error("The advanced smoke job did not expose a bounded ETA range while running.");
+    summary.failedAt = "sensitivity report";
     const records = result.representation?.parameterSensitivity?.records;
     if (!Array.isArray(records) || records.length !== 5) {
       throw new Error("The advanced smoke job did not return the expected five-record sensitivity report.");
     }
-    summary.verification.push("five-variant sensitivity report");
+    summary.verification.push("advanced ETA range", "five-variant sensitivity report");
   }
+  summary.failedAt = "execution timeline";
+  const executionTiming = result.representation?.executionTiming;
+  if (!executionTiming || !Array.isArray(executionTiming.stages) || !Number.isFinite(executionTiming.totalDurationMs) || executionTiming.totalDurationMs < 0 || executionTiming.stages.length < 2 || executionTiming.stages.some(stage => !Number.isFinite(stage.durationMs) || stage.durationMs < 0)) {
+    throw new Error("Completed result did not return a valid server-observed execution timeline.");
+  }
+  if (runSensitivity && !executionTiming.stages.some(stage => stage.stage === "sensitivity")) throw new Error("The advanced timeline did not retain its sensitivity stage.");
+  summary.verification.push("execution timeline");
   const entities = Array.isArray(result.representation?.entities) ? result.representation.entities : [];
   const firstEntity = entities[0];
   const mode = "constant";
@@ -164,6 +177,6 @@ try {
   summary.failedAt = "";
   console.log(JSON.stringify({ smoke: "passed", ...summary }));
 } catch {
-  console.log(JSON.stringify({ smoke: "failed", mode: summary.mode, terminal: summary.terminal || "unavailable", elapsedMs: summary.elapsedMs, observedStatuses: summary.observedStatuses, observedStages: summary.observedStages, verification: summary.verification, failedAt: summary.failedAt }));
+  console.log(JSON.stringify({ smoke: "failed", mode: summary.mode, terminal: summary.terminal || "unavailable", elapsedMs: summary.elapsedMs, observedStatuses: summary.observedStatuses, observedStages: summary.observedStages, advancedEtaObserved: summary.advancedEtaObserved, verification: summary.verification, failedAt: summary.failedAt }));
   process.exitCode = 1;
 }

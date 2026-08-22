@@ -12,7 +12,7 @@ vi.mock("./db", () => ({
 
 vi.mock("./storage", () => ({ storagePut: vi.fn(), storageGetSignedUrl: vi.fn() }));
 
-import { __testOnly, getAnalysisJob } from "./imageAnalysis";
+import { AnalysisJobStore, __testOnly, getAnalysisJob } from "./imageAnalysis";
 
 describe("durable analysis lifecycle guard", () => {
   const ownerId = "visitor:test-browser-workspace";
@@ -21,6 +21,7 @@ describe("durable analysis lifecycle guard", () => {
     vi.clearAllMocks();
     __testOnly.clearActiveJob("stale-discarded");
     __testOnly.clearActiveJob("stale-expired");
+    __testOnly.clearActiveJob("restored-timing");
   });
 
   it("does not reveal a stale process-local job after a durable discard", async () => {
@@ -44,5 +45,36 @@ describe("durable analysis lifecycle guard", () => {
 
     expect(advancedBudget).toBeGreaterThan(normalBudget);
     expect(advancedBudget).toBeLessThanOrEqual(7 * 60 * 1000);
+  });
+
+  it("coalesces sensitivity heartbeats into one timed stage and exposes a bounded advanced ETA range", () => {
+    const store = new AnalysisJobStore(60_000);
+    store.create("timed-advanced", ownerId, 1_000, { runParameterSensitivity: true, sensitivityVariantLimit: 5 });
+    store.update("timed-advanced", { status: "running", stage: "feature_extraction", percent: 18, message: "Feature extraction." }, 2_000);
+    store.update("timed-advanced", { status: "running", stage: "sensitivity", percent: 90, message: "Sensitivity study: variant 2 of 5 (finer partition)." }, 7_000);
+    const active = store.update("timed-advanced", { status: "running", stage: "sensitivity", percent: 91, message: "Sensitivity study: variant 2 of 5 (finer partition) — reconstruction." }, 13_000);
+
+    expect(active?.timing?.stages.map(stage => stage.stage)).toEqual(["queued", "feature_extraction", "sensitivity"]);
+    expect(active?.timing?.stages.at(-1)?.durationMs).toBe(6_000);
+    expect(active?.timing?.advancedEta).toMatchObject({ basis: "sensitivity_variant" });
+    expect(active?.timing?.advancedEta?.minimumRemainingMs).toBeLessThanOrEqual(active?.timing?.advancedEta?.maximumRemainingMs ?? 0);
+
+    const completed = store.complete("timed-advanced", 20_000);
+    expect(completed?.timing?.advancedEta).toBeNull();
+    expect(completed?.timing?.stages.at(-1)).toMatchObject({ stage: "sensitivity", endedAt: 20_000, durationMs: 13_000 });
+  });
+
+  it("omits ETA ranges from normal primary analyses", () => {
+    const store = new AnalysisJobStore(60_000);
+    store.create("timed-primary", ownerId, 1_000, { runParameterSensitivity: false, sensitivityVariantLimit: 0 });
+    const active = store.update("timed-primary", { status: "running", stage: "reconstruction", percent: 88, message: "Reconstructing." }, 8_000);
+    expect(active?.timing?.advancedEta).toBeNull();
+  });
+
+  it("restores the owner-scoped durable timing snapshot when no local job remains", async () => {
+    const restored = { jobId: "restored-timing", ownerId, status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: 1_000, updatedAt: 9_000, completedAt: 9_000, expiresAt: Date.now() + 60_000, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 8_000, stages: [{ stage: "feature_extraction", label: "Feature extraction", startedAt: 1_000, endedAt: 9_000, durationMs: 8_000 }], advancedEta: null } };
+    getAnalysisManifestMock.mockResolvedValue({ jobId: "restored-timing", ownerId, status: "completed", expiresAt: new Date(Date.now() + 60_000), completedAt: new Date(9_000), error: null, progressSnapshot: JSON.stringify(restored) });
+
+    await expect(getAnalysisJob("restored-timing")).resolves.toMatchObject({ jobId: "restored-timing", ownerId, resultAvailable: true, timing: restored.timing });
   });
 });

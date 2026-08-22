@@ -1,0 +1,1 @@
+ALTER TABLE `analysisManifests` ADD `progressSnapshot` mediumtext;
