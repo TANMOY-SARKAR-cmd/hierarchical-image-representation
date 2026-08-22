@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 
 def sensitivity_variants(config: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
@@ -27,14 +27,32 @@ def sensitivity_variants(config: Dict[str, Any], limit: int) -> List[Dict[str, A
     return output
 
 
-def run_parameter_sensitivity(input_path: Path, output_dir: Path, config: Dict[str, Any], analyze: Callable[[Path, Path, Dict[str, Any]], Dict[str, Any]]) -> Dict[str, Any]:
+def run_parameter_sensitivity(
+    input_path: Path,
+    output_dir: Path,
+    config: Dict[str, Any],
+    analyze: Callable[..., Dict[str, Any]],
+    progress: Optional[Callable[[str, int, str], None]] = None,
+) -> Dict[str, Any]:
     report_dir = output_dir / "sensitivity"
     report_dir.mkdir(parents=True, exist_ok=True)
     records: List[Dict[str, Any]] = []
-    for variant in sensitivity_variants(config, int(config.get("sensitivityVariantLimit", 5))):
+    variants = sensitivity_variants(config, int(config.get("sensitivityVariantLimit", 5)))
+    total = len(variants)
+    for index, variant in enumerate(variants):
         label = str(variant.pop("sensitivityVariant"))
         run_dir = report_dir / label
-        result = analyze(input_path, run_dir, variant)
+        if progress is not None:
+            progress("sensitivity", 89 + int((index / max(total, 1)) * 4), f"Sensitivity study: variant {index + 1} of {total} ({label.replace('_', ' ')}).")
+
+        def nested_progress(stage: str, percent: int, _message: str) -> None:
+            if progress is None:
+                return
+            completed_fraction = (index + max(0, min(100, int(percent))) / 100.0) / max(total, 1)
+            outer_percent = min(93, 89 + int(completed_fraction * 4))
+            progress("sensitivity", outer_percent, f"Sensitivity study: variant {index + 1} of {total} ({label.replace('_', ' ')}) — {stage.replace('_', ' ')}.")
+
+        result = analyze(input_path, run_dir, variant, progress=nested_progress)
         payload = json.loads(Path(result["representationPath"]).read_text(encoding="utf-8"))
         entity_counts: Dict[str, int] = {}
         for entity in payload["entities"]:
@@ -48,6 +66,8 @@ def run_parameter_sensitivity(input_path: Path, output_dir: Path, config: Dict[s
             "artifactStorageBytes": payload["artifactStorage"]["totalBytes"],
             "configHash": payload["experiment"]["configHash"],
         })
+    if progress is not None and total:
+        progress("sensitivity", 93, f"Completed deterministic sensitivity study with {total} variants.")
     report = {
         "schema": "ParameterSensitivity@0.7",
         "design": "bounded_one_factor_family_perturbations",

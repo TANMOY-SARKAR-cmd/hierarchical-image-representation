@@ -244,7 +244,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any], prog
     write_overlay(absolute_error, error_dir / "absolute-error.png", cv2.COLORMAP_INFERNO); write_overlay(parametric_error, error_dir / "parametric-error.png", cv2.COLORMAP_INFERNO); write_overlay(per_region_error, error_dir / "per-region-error.png", cv2.COLORMAP_MAGMA); write_overlay(residual_energy, error_dir / "residual-energy.png", cv2.COLORMAP_TURBO); create_svg(base_labels, rgb, output_dir / "reconstruction.svg")
     profile["reconstructionMs"] = rounded((time.perf_counter() - reconstruction_started) * 1000, 3)
     report("reconstruction", 88, "Rendered structural, adaptive, and residual reconstruction artifacts.")
-    sensitivity_report = run_parameter_sensitivity(input_path, output_dir, config, analyze) if config.get("runParameterSensitivity", False) else None
+    sensitivity_report = run_parameter_sensitivity(input_path, output_dir, config, analyze, report) if config.get("runParameterSensitivity", False) else None
 
     validity = validate_representation(all_entities, masks, root["id"])
     overlap_matrix = normalized_overlap_matrix(cross_scale_overlaps)

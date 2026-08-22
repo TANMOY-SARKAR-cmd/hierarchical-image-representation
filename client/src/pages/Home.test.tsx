@@ -121,11 +121,43 @@ describe("Hierarchy workbench UI", () => {
     expect(view.getByRole("button", { name: /segmentation/i })).toBeDisabled();
   });
 
+  it("explains the sensitivity heartbeat stage and keeps the primary reconstruction settings intact", () => {
+    const now = Date.now();
+    const view = render(<AnalysisProgressPanel job={{ jobId: "job-1", status: "running", stage: "sensitivity", percent: 91, message: "Sensitivity study: variant 3 of 5 (conservative merges) — reconstruction.", createdAt: now - 12_000, updatedAt: now, completedAt: null, expiresAt: now + 1_800_000, error: null, resultAvailable: false }} />);
+    expect(view.getByRole("heading", { name: "sensitivity" })).toBeInTheDocument();
+    expect(view.getByText(/additional deterministic variants/i)).toBeInTheDocument();
+    expect(view.getByText(/primary reconstruction settings are unchanged/i)).toBeInTheDocument();
+  });
+
+  it("shows the five-variant duration guidance and retries the selected file after a terminal failure", async () => {
+    startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
+    jobStatusQuery.data = { jobId: "job-1", status: "failed", stage: "failed", percent: 89, message: "Analysis did not complete.", createdAt: Date.now() - 10_000, updatedAt: Date.now(), completedAt: Date.now(), expiresAt: Date.now() + 1_800_000, error: "The advanced sensitivity study exceeded its bounded processing time.", resultAvailable: false };
+    const view = render(<Home />);
+    fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
+    fireEvent.click(view.getByRole("button", { name: "Off" }));
+    expect(view.getByText(/primary reconstruction is followed by five deterministic comparison variants/i)).toBeInTheDocument();
+    fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
+    const retry = await view.findByRole("button", { name: "Retry same analysis" });
+    fireEvent.click(retry);
+    await waitFor(() => expect(startMutation.mutateAsync).toHaveBeenCalledTimes(2));
+  });
+
   it("offers an owner-scoped cancellation action while analysis is active", async () => {
     authState.user = { role: "user" };
     startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
     cancelMutation.mutateAsync.mockResolvedValue({ jobId: "job-1", status: "cancelled" });
     jobStatusQuery.data = { jobId: "job-1", status: "running", stage: "segmentation", percent: 38, message: "Built deterministic micro-regions.", createdAt: Date.now() - 4_000, updatedAt: Date.now(), completedAt: null, expiresAt: Date.now() + 1_800_000, error: null, resultAvailable: false };
+    const view = render(<Home />);
+    fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
+    fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
+    fireEvent.click(await view.findByRole("button", { name: "Cancel analysis" }));
+    expect(cancelMutation.mutateAsync).toHaveBeenCalledWith({ jobId: "job-1" });
+  });
+
+  it("keeps cancellation available while the optional sensitivity study is running", async () => {
+    startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
+    cancelMutation.mutateAsync.mockResolvedValue({ jobId: "job-1", status: "cancelled" });
+    jobStatusQuery.data = { jobId: "job-1", status: "running", stage: "sensitivity", percent: 91, message: "Sensitivity study: variant 3 of 5 — merge tree.", createdAt: Date.now() - 12_000, updatedAt: Date.now(), completedAt: null, expiresAt: Date.now() + 1_800_000, error: null, resultAvailable: false };
     const view = render(<Home />);
     fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
     fireEvent.click(view.getByRole("button", { name: /run analysis/i }));

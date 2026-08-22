@@ -126,6 +126,9 @@ const DEFAULT_SUBMISSION_WINDOW_MS = 60 * 1000;
 const DEFAULT_SUBMISSION_MAX_PER_WINDOW = 3;
 const DEFAULT_MAX_INFLIGHT_ANALYSES = 2;
 const DEFAULT_PROGRESS_TIMEOUT_MS = 45 * 1000;
+const DEFAULT_PROCESS_TIMEOUT_MS = 120 * 1000;
+const DEFAULT_SENSITIVITY_VARIANT_TIMEOUT_MS = 60 * 1000;
+const DEFAULT_MAX_ADVANCED_PROCESS_TIMEOUT_MS = 7 * 60 * 1000;
 const ERROR_HEATMAP_REFERENCE_DELTA = 32;
 const MAX_THRESHOLD_HEATMAPS = 96;
 const decodedErrorEvidence = new Map<string, { width: number; height: number; values: Uint16Array }>();
@@ -136,6 +139,21 @@ const cancelledJobIds = new Set<string>();
 function positiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function processTimeoutFor(config: Pick<AnalysisConfig, "runParameterSensitivity" | "sensitivityVariantLimit">) {
+  const normalBudgetMs = positiveInteger(process.env.ANALYSIS_PROCESS_TIMEOUT_MS, DEFAULT_PROCESS_TIMEOUT_MS);
+  if (!config.runParameterSensitivity) return normalBudgetMs;
+  const variantCount = Math.max(0, Math.min(5, Math.floor(config.sensitivityVariantLimit)));
+  const additionalPerVariantMs = positiveInteger(process.env.ANALYSIS_SENSITIVITY_VARIANT_TIMEOUT_MS, DEFAULT_SENSITIVITY_VARIANT_TIMEOUT_MS);
+  const maximumAdvancedBudgetMs = positiveInteger(process.env.ANALYSIS_MAX_ADVANCED_PROCESS_TIMEOUT_MS, DEFAULT_MAX_ADVANCED_PROCESS_TIMEOUT_MS);
+  return Math.min(maximumAdvancedBudgetMs, normalBudgetMs + variantCount * additionalPerVariantMs);
+}
+
+function processingLimitMessage(config: AnalysisConfig) {
+  return config.runParameterSensitivity
+    ? "The advanced sensitivity study exceeded its bounded processing time. You can retry the same analysis or run only the primary analysis."
+    : "The analysis exceeded the processing limit. Please retry with the same image or a smaller image.";
 }
 
 export class AnalysisAdmissionError extends Error {
@@ -387,11 +405,13 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
         reject(new AnalysisEngineError("The analysis engine did not report progress in time. Please retry with a smaller image or less detail."));
       }, progressTimeoutMs);
     };
+    const processTimeoutMs = processTimeoutFor(config);
     const timeout = setTimeout(() => {
+      console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} exceeded its ${config.runParameterSensitivity ? "advanced" : "standard"} processing budget after ${processTimeoutMs} ms.`);
       processHandle.kill("SIGKILL");
-      reject(new AnalysisEngineError("The analysis exceeded the processing limit. Please retry with a smaller image or less detail."));
-    }, 120_000);
-    console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} started Python analysis.`);
+      reject(new AnalysisEngineError(processingLimitMessage(config)));
+    }, processTimeoutMs);
+    console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} started Python analysis with ${config.runParameterSensitivity ? "advanced" : "standard"} processing budget ${processTimeoutMs} ms.`);
     armLivenessTimeout();
     processHandle.stdout.on("data", chunk => {
       const text = chunk.toString();
@@ -715,6 +735,7 @@ export function getAnalysisCacheTelemetry() {
 }
 
 export const __testOnly = {
+  processTimeoutFor,
   seedActiveJob(jobId: string, ownerId: string, now = Date.now()) {
     return activeJobs.create(jobId, ownerId, now);
   },

@@ -20,7 +20,8 @@ class ParameterSensitivityTest(unittest.TestCase):
             source = workspace / "fixture.png"
             Image.fromarray(image).save(source)
             output = workspace / "output"
-            payload = json.loads(Path(analyze(source, output, {"maxImagePixels": 10_000, "scaleLevels": [1], "slicSegments": 16, "minimumRegionPixels": 2, "runParameterSensitivity": True, "sensitivityVariantLimit": 2})["representationPath"]).read_text())
+            progress = []
+            payload = json.loads(Path(analyze(source, output, {"maxImagePixels": 10_000, "scaleLevels": [1], "slicSegments": 16, "minimumRegionPixels": 2, "runParameterSensitivity": True, "sensitivityVariantLimit": 2}, progress=lambda stage, percent, message: progress.append((stage, percent, message)))["representationPath"]).read_text())
 
             report = payload["parameterSensitivity"]
             self.assertEqual(report["schema"], "ParameterSensitivity@0.7")
@@ -32,6 +33,11 @@ class ParameterSensitivityTest(unittest.TestCase):
             self.assertTrue(report_path.exists())
             self.assertEqual(json.loads(report_path.read_text())["records"], report["records"])
             self.assertIn("sensitivity/report.json", payload["artifactStorage"]["files"])
+            sensitivity_events = [event for event in progress if event[0] == "sensitivity"]
+            self.assertGreaterEqual(len(sensitivity_events), 6)
+            self.assertEqual(sensitivity_events[-1][1], 93)
+            self.assertTrue(any("variant 1 of 2" in event[2] for event in sensitivity_events))
+            self.assertTrue(any("variant 2 of 2" in event[2] for event in sensitivity_events))
 
 
 if __name__ == "__main__":

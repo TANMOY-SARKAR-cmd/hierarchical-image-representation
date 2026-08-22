@@ -21,7 +21,9 @@ pnpm build
 
 ## Browser-workspace lifecycle and live smoke verification
 
-Anonymous jobs, results, artifact manifests, hierarchy/entity records, exact local ΔRGB samples, thresholded heatmaps, cancellation, and discard are all scoped to the same browser workspace. A durable manifest records queued, running, uploading, completed, failed, cancelled, discarded, and expired states. Server logs record only a job correlation ID and lifecycle stages; a no-progress watchdog turns an unresponsive Python job into a safe terminal failure instead of leaving it indefinitely in an early stage.
+Anonymous jobs, results, artifact manifests, hierarchy/entity records, exact local ΔRGB samples, thresholded heatmaps, cancellation, and discard are all scoped to the same browser workspace. A durable manifest records queued, running, uploading, completed, failed, cancelled, discarded, and expired states. Server logs record only a job correlation ID and lifecycle stages. A no-progress watchdog still turns an unresponsive Python job into a safe terminal failure, while an enabled five-variant sensitivity study forwards nested stage heartbeats as the visible `sensitivity` phase so legitimate advanced work is not misclassified as stalled.
+
+Normal analyses retain a bounded 120-second process budget. The explicitly requested sensitivity study receives a larger but finite bounded budget, derived from its capped variant count and limited by a server-side advanced-workload maximum. The workbench keeps cancellation available during that phase and offers **Retry same analysis** after a terminal retryable failure without requiring a new upload or changing the selected fidelity configuration.
 
 Completed result access expires after the configured retention interval. **Discard and expiry are access-only revocations**: they clear cached result/evidence references and remove the durable payload so the workbench can no longer issue them. The current managed storage adapter has no supported physical delete method, so this workbench does not claim immediate deletion of underlying platform object bytes.
 
@@ -30,8 +32,9 @@ Run the bounded anonymous lifecycle check against either local development or th
 ```bash
 HIR_SMOKE_BASE_URL=http://127.0.0.1:3000 pnpm smoke:live
 HIR_SMOKE_BASE_URL=https://your-public-domain.example pnpm smoke:live
+HIR_SMOKE_BASE_URL=https://your-public-domain.example HIR_SMOKE_SENSITIVITY=1 pnpm smoke:live
 ```
 
-The smoke command verifies same-browser completion, different-browser denial, result and artifact categories, exact ΔRGB and thresholded heatmap routes, discard, and post-discard denial across all private inspection routes.
+The smoke command verifies same-browser completion, different-browser denial, result and artifact categories, exact ΔRGB and thresholded heatmap routes, discard, and post-discard denial across all private inspection routes. Its opt-in sensitivity mode uses the same generated non-sensitive image, verifies that the public job reports the `sensitivity` phase, and logs only stages, status categories, timings, and response categories.
 
 The workbench begins with source upload, a segmentation method, and a fidelity profile; expert configuration stays collapsed until requested. Completed results progressively reveal overlays, **Constant baseline**, **Adaptive model**, **Residual detail**, and **Final fidelity** outputs. Read the [v0.7 representation contract](docs/representation.md) and [architecture](docs/architecture.md) before changing core algorithms. The merge priority is a deterministic local approximation and does not claim global partition optimality. Learned grouping, neural reconstruction, semantic labels, identity processing, universal codec claims, and external scientific performance claims remain intentionally out of scope.

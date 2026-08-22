@@ -7,8 +7,9 @@ if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
   throw new Error("Set HIR_SMOKE_BASE_URL to the public or local workbench origin before running this smoke check.");
 }
 
-const timeoutMs = Number.parseInt(process.env.HIR_SMOKE_TIMEOUT_MS ?? "150000", 10);
-const pollMs = 800;
+const runSensitivity = process.env.HIR_SMOKE_SENSITIVITY === "1";
+const timeoutMs = Number.parseInt(process.env.HIR_SMOKE_TIMEOUT_MS ?? (runSensitivity ? "480000" : "150000"), 10);
+const pollMs = runSensitivity ? 350 : 800;
 
 function makeFixture() {
   const image = new PNG({ width: 64, height: 48 });
@@ -61,11 +62,13 @@ async function expectDenied(label, operation) {
 async function pollForTerminal(client, jobId) {
   const startedAt = Date.now();
   const observedStatuses = new Set();
+  const observedStages = new Set();
   while (Date.now() - startedAt < timeoutMs) {
     const job = await client.imageAnalysis.status.query({ jobId });
     observedStatuses.add(job.status);
+    observedStages.add(job.stage);
     if (job.status === "completed" || job.status === "failed" || job.status === "cancelled" || job.status === "expired") {
-      return { job, elapsedMs: Date.now() - startedAt, observedStatuses: [...observedStatuses] };
+      return { job, elapsedMs: Date.now() - startedAt, observedStatuses: [...observedStatuses], observedStages: [...observedStages] };
     }
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
@@ -88,12 +91,14 @@ const request = {
     reconstructionProfile: "fast",
     residualEnabled: true,
     residualBudgetBytes: 24 * 1024,
+    runParameterSensitivity: runSensitivity,
+    sensitivityVariantLimit: 5,
   },
 };
 
 const client = createAnonymousClient();
 const isolatedClient = createAnonymousClient();
-const summary = { terminal: "", elapsedMs: 0, observedStatuses: [], verification: [], failedAt: "startup" };
+const summary = { mode: runSensitivity ? "five_variant_sensitivity" : "primary", terminal: "", elapsedMs: 0, observedStatuses: [], observedStages: [], verification: [], failedAt: "startup" };
 
 try {
   summary.failedAt = "start";
@@ -103,8 +108,12 @@ try {
   summary.terminal = terminal.job.status;
   summary.elapsedMs = terminal.elapsedMs;
   summary.observedStatuses = terminal.observedStatuses;
+  summary.observedStages = terminal.observedStages;
   if (terminal.job.status !== "completed" || !terminal.job.resultAvailable) {
     throw new Error("The live job did not produce an available completed result.");
+  }
+  if (runSensitivity && !terminal.observedStages.includes("sensitivity")) {
+    throw new Error("The advanced smoke job completed without exposing its sensitivity stage.");
   }
 
   summary.failedAt = "cross-browser isolation";
@@ -151,6 +160,6 @@ try {
   summary.failedAt = "";
   console.log(JSON.stringify({ smoke: "passed", ...summary }));
 } catch {
-  console.log(JSON.stringify({ smoke: "failed", terminal: summary.terminal || "unavailable", elapsedMs: summary.elapsedMs, observedStatuses: summary.observedStatuses, verification: summary.verification, failedAt: summary.failedAt }));
+  console.log(JSON.stringify({ smoke: "failed", mode: summary.mode, terminal: summary.terminal || "unavailable", elapsedMs: summary.elapsedMs, observedStatuses: summary.observedStatuses, observedStages: summary.observedStages, verification: summary.verification, failedAt: summary.failedAt }));
   process.exitCode = 1;
 }

@@ -37,4 +37,12 @@ describe("durable analysis lifecycle guard", () => {
     await expect(getAnalysisJob("stale-expired")).resolves.toBeNull();
     expect(expireAnalysisManifestMock).toHaveBeenCalledWith("stale-expired", ownerId);
   });
+
+  it("grants the explicitly requested five-variant study a longer but finite processing budget", () => {
+    const normalBudget = __testOnly.processTimeoutFor({ runParameterSensitivity: false, sensitivityVariantLimit: 0 });
+    const advancedBudget = __testOnly.processTimeoutFor({ runParameterSensitivity: true, sensitivityVariantLimit: 5 });
+
+    expect(advancedBudget).toBeGreaterThan(normalBudget);
+    expect(advancedBudget).toBeLessThanOrEqual(7 * 60 * 1000);
+  });
 });

@@ -150,3 +150,7 @@
 - [x] Refine first-use onboarding with essential controls, explicit terminology, and post-result progressive disclosure on desktop and mobile.
 - [x] Add local anonymous lifecycle and browser-workflow regressions plus a bounded deployed anonymous end-to-end smoke suite.
 - [x] Validate, document the access-only retention boundary, checkpoint, synchronize, and deliver the live-completion release.
+- [ ] Add sensitivity-phase progress heartbeats and bounded advanced-workload timeout handling without reducing analysis detail.
+- [ ] Improve first-use advanced-study messaging, live status wording, and retry recovery after retryable analysis failures.
+- [ ] Add local and deployed five-variant sensitivity completion, liveness, cancellation, and retry regressions.
+- [ ] Validate, document, checkpoint, synchronize, and deliver the advanced-analysis completion reliability release.
