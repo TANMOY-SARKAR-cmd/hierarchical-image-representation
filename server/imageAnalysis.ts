@@ -105,6 +105,17 @@ export type AnalysisTimingSnapshot = {
   advancedEta: AdvancedEtaRange | null;
 };
 
+export type AnalysisFailureReceipt = {
+  schema: "AnalysisFailure@1";
+  category: "spawn_failure" | "startup_silence" | "stage_silence" | "process_budget" | "engine_exit" | "malformed_completion" | "unexpected_failure";
+  lastSafeStage: string;
+  elapsedMs: number;
+  childSpawned: boolean;
+  startupHeartbeatObserved: boolean;
+  engineReadyObserved: boolean;
+  diagnosticToken: string;
+};
+
 export type AnalysisJobStatus = {
   jobId: string;
   ownerId: string;
@@ -119,6 +130,7 @@ export type AnalysisJobStatus = {
   error: string | null;
   resultAvailable: boolean;
   timing?: AnalysisTimingSnapshot;
+  failureReceipt?: AnalysisFailureReceipt;
 };
 
 type AnalysisProgressEvent = Pick<AnalysisJobStatus, "status" | "stage" | "percent" | "message">;
@@ -260,7 +272,10 @@ export class AnalysisInputError extends Error {
 
 export class AnalysisEngineError extends Error {
   readonly code = "ENGINE_FAILURE";
-  constructor(message = "The image analysis engine could not complete this input. Reduce segmentation detail or choose a smaller image and retry.") {
+  constructor(
+    message = "The image analysis engine could not complete this input. Reduce segmentation detail or choose a smaller image and retry.",
+    readonly failure: Omit<AnalysisFailureReceipt, "schema" | "elapsedMs" | "diagnosticToken"> | null = null,
+  ) {
     super(message);
   }
 }
@@ -392,7 +407,7 @@ export class AnalysisJobStore {
   complete(jobId: string, now = Date.now()) {
     const job = this.jobs.get(jobId);
     if (!job) return null;
-    if (job.status === "completed") return this.snapshot(job, now);
+    if (terminalStatus(job.status)) return this.snapshot(job, now);
     const next = this.completedSnapshot(job, now);
     this.jobs.set(jobId, next);
     return this.snapshot(next, now);
@@ -403,10 +418,11 @@ export class AnalysisJobStore {
     return job ? this.snapshot(this.completedSnapshot(job, now), now) : null;
   }
 
-  fail(jobId: string, error: string, now = Date.now()) {
+  fail(jobId: string, error: string, now = Date.now(), failureReceipt?: AnalysisFailureReceipt) {
     const job = this.jobs.get(jobId);
     if (!job) return null;
-    const next = { ...job, status: "failed" as const, stage: "failed", message: "Analysis did not complete.", updatedAt: now, completedAt: now, error, resultAvailable: false, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null } };
+    if (terminalStatus(job.status)) return this.snapshot(job, now);
+    const next = { ...job, status: "failed" as const, stage: "failed", message: "Analysis did not complete.", updatedAt: now, completedAt: now, error, resultAvailable: false, ...(failureReceipt ? { failureReceipt } : {}), timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null } };
     this.jobs.set(jobId, next);
     return this.snapshot(next, now);
   }
@@ -512,14 +528,51 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
     let stdoutBuffer = "";
     let stderr = "";
     let lastProgressStage = "initialization";
+    let childSpawned = false;
+    let startupHeartbeatObserved = false;
+    let engineReadyObserved = false;
+    let settled = false;
     const progressTimeoutMs = positiveInteger(process.env.ANALYSIS_PROGRESS_TIMEOUT_MS, DEFAULT_PROGRESS_TIMEOUT_MS);
     const processTimeoutMs = processTimeoutFor(config);
     const startupTimeoutMs = Math.min(processTimeoutMs, positiveInteger(process.env.ANALYSIS_ENGINE_STARTUP_TIMEOUT_MS, DEFAULT_ENGINE_STARTUP_TIMEOUT_MS));
     let awaitingEngineReady = true;
     let livenessTimeout: ReturnType<typeof setTimeout> | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
     const clearLivenessTimeout = () => {
       if (livenessTimeout) clearTimeout(livenessTimeout);
       livenessTimeout = null;
+    };
+    const clearTimers = () => {
+      clearLivenessTimeout();
+      if (timeout) clearTimeout(timeout);
+      timeout = null;
+    };
+    const failure = (category: AnalysisFailureReceipt["category"], message: string) => new AnalysisEngineError(message, {
+      category,
+      lastSafeStage: lastProgressStage,
+      childSpawned,
+      startupHeartbeatObserved,
+      engineReadyObserved,
+    });
+    const settleReject = (error: Error) => {
+      if (settled) return false;
+      settled = true;
+      clearTimers();
+      if (jobId) activeProcesses.delete(jobId);
+      reject(error);
+      return true;
+    };
+    const settleResolve = () => {
+      if (settled) return false;
+      settled = true;
+      clearTimers();
+      if (jobId) activeProcesses.delete(jobId);
+      resolve();
+      return true;
+    };
+    const terminateWith = (error: AnalysisEngineError) => {
+      if (!settleReject(error)) return;
+      processHandle.kill("SIGKILL");
     };
     const armLivenessTimeout = () => {
       clearLivenessTimeout();
@@ -527,17 +580,18 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
         const stage = stageLabel(lastProgressStage).toLowerCase();
         const livenessWindowMs = awaitingEngineReady ? startupTimeoutMs : progressTimeoutMs;
         console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} did not report progress during ${stage} within ${livenessWindowMs} ms.`);
-        processHandle.kill("SIGKILL");
-        reject(new AnalysisEngineError(`The analysis engine stopped reporting progress during ${stage} and was safely stopped. You can retry the same analysis.`));
+        terminateWith(failure(awaitingEngineReady ? "startup_silence" : "stage_silence", `The analysis engine stopped reporting progress during ${stage} and was safely stopped. You can retry the same analysis.`));
       }, awaitingEngineReady ? startupTimeoutMs : progressTimeoutMs);
     };
-    const timeout = setTimeout(() => {
+    timeout = setTimeout(() => {
       console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} exceeded its ${config.runParameterSensitivity ? "advanced" : "standard"} processing budget after ${processTimeoutMs} ms.`);
-      processHandle.kill("SIGKILL");
-      reject(new AnalysisEngineError(processingLimitMessage(config)));
+      terminateWith(failure("process_budget", processingLimitMessage(config)));
     }, processTimeoutMs);
     console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} started Python analysis with ${config.runParameterSensitivity ? "advanced" : "standard"} processing budget ${processTimeoutMs} ms.`);
     armLivenessTimeout();
+    processHandle.on("spawn", () => {
+      childSpawned = true;
+    });
     processHandle.stdout.on("data", chunk => {
       const text = chunk.toString();
       stdout = (stdout + text).slice(-1_000_000);
@@ -549,7 +603,11 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
           const event = JSON.parse(line) as { event?: string; stage?: string; percent?: number; message?: string };
           if (event.event === "progress" && typeof event.stage === "string" && typeof event.percent === "number" && typeof event.message === "string") {
             lastProgressStage = event.stage;
-            if (event.stage !== "initializing_engine") awaitingEngineReady = false;
+            if (event.stage === "initializing_engine") startupHeartbeatObserved = true;
+            else {
+              awaitingEngineReady = false;
+              engineReadyObserved = true;
+            }
             armLivenessTimeout();
             console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} progressed to ${event.stage} (${event.percent}%).`);
             onProgress?.({ status: "running", stage: event.stage, percent: event.percent, message: event.message });
@@ -563,30 +621,28 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
       stderr = (stderr + chunk.toString()).slice(-8_000);
     });
     processHandle.on("error", error => {
-      clearTimeout(timeout);
-      clearLivenessTimeout();
-      reject(new Error(`Could not start the Python analysis engine: ${error.message}`));
+      console.error(`[ImageAnalysis] Python engine could not start: ${error.message}`);
+      settleReject(failure("spawn_failure", "The analysis engine could not start. Please retry the same analysis."));
     });
     processHandle.on("close", code => {
-      clearTimeout(timeout);
-      clearLivenessTimeout();
-      if (jobId) activeProcesses.delete(jobId);
+      if (settled) return;
       if (jobId && cancelledJobIds.has(jobId)) {
         cancelledJobIds.delete(jobId);
-        reject(new AnalysisCancelledError("Analysis was cancelled before completion."));
+        settleReject(new AnalysisCancelledError("Analysis was cancelled before completion."));
         return;
       }
       if (code !== 0) {
         console.error(`[ImageAnalysis] Python engine failed with exit code ${code}: ${stderr.slice(-4000)}`);
-        reject(new AnalysisEngineError());
+        settleReject(failure("engine_exit", "The analysis engine could not complete this input. You can retry the same analysis."));
         return;
       }
       try {
         const completion = JSON.parse(stdout.trim().split("\n").filter(Boolean).at(-1) ?? "{}");
         if (!completion.ok) throw new Error("The Python analysis engine returned an invalid completion response.");
-        resolve();
+        settleResolve();
       } catch (error) {
-        reject(error instanceof Error ? error : new Error("The Python analysis engine returned malformed output."));
+        console.error(`[ImageAnalysis] Python engine returned malformed completion output: ${error instanceof Error ? error.message : "unknown error"}`);
+        settleReject(failure("malformed_completion", "The analysis engine returned an incomplete result. You can retry the same analysis."));
       }
     });
   });
@@ -835,9 +891,20 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
       const safeError = error instanceof AnalysisEngineError
         ? error.message
         : "The analysis could not complete. Please retry with a smaller image or less detail.";
-      const terminalJob = cancelled ? activeJobs.cancel(jobId) : activeJobs.fail(jobId, safeError);
+      const terminalAt = Date.now();
+      const failureReceipt: AnalysisFailureReceipt | undefined = cancelled ? undefined : {
+        schema: "AnalysisFailure@1",
+        category: error instanceof AnalysisEngineError && error.failure ? error.failure.category : "unexpected_failure",
+        lastSafeStage: error instanceof AnalysisEngineError && error.failure ? error.failure.lastSafeStage : latestJob.stage,
+        elapsedMs: Math.max(0, terminalAt - latestJob.createdAt),
+        childSpawned: error instanceof AnalysisEngineError && error.failure ? error.failure.childSpawned : false,
+        startupHeartbeatObserved: error instanceof AnalysisEngineError && error.failure ? error.failure.startupHeartbeatObserved : false,
+        engineReadyObserved: error instanceof AnalysisEngineError && error.failure ? error.failure.engineReadyObserved : false,
+        diagnosticToken: `HIR-${jobId}`,
+      };
+      const terminalJob = cancelled ? activeJobs.cancel(jobId, terminalAt) : activeJobs.fail(jobId, safeError, terminalAt, failureReceipt);
       console.error(`[ImageAnalysis] Job ${jobId} ended ${cancelled ? "cancelled" : "failed"}.`);
-      await saveAnalysisManifest({ jobId, ownerId, status: cancelled ? "cancelled" : "failed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), error: cancelled ? null : safeError, progressSnapshot: terminalJob ? JSON.stringify(terminalJob) : null }).catch(() => undefined);
+      await saveAnalysisManifest({ jobId, ownerId, status: cancelled ? "cancelled" : "failed", expiresAt: new Date(terminalAt + DEFAULT_RESULT_TTL_MS), completedAt: new Date(terminalAt), error: cancelled ? null : safeError, progressSnapshot: terminalJob ? JSON.stringify(terminalJob) : null }).catch(() => undefined);
     });
   return job;
 }

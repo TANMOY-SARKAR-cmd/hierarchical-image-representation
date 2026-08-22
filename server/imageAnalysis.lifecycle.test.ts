@@ -90,6 +90,19 @@ describe("durable analysis lifecycle guard", () => {
     ]);
   });
 
+  it("retains the first safe failure receipt and refuses stale terminal overwrites", () => {
+    const store = new AnalysisJobStore(60_000);
+    store.create("failure-receipt", ownerId, 1_000);
+    const receipt = { schema: "AnalysisFailure@1" as const, category: "startup_silence" as const, lastSafeStage: "initializing_engine", elapsedMs: 45_000, childSpawned: true, startupHeartbeatObserved: true, engineReadyObserved: false, diagnosticToken: "HIR-failure-receipt" };
+    const failed = store.fail("failure-receipt", "The analysis engine stopped reporting progress during engine startup.", 46_000, receipt);
+    const staleCompletion = store.complete("failure-receipt", 47_000);
+    const staleFailure = store.fail("failure-receipt", "A later process-close error.", 48_000, { ...receipt, category: "engine_exit" });
+
+    expect(failed).toMatchObject({ status: "failed", failureReceipt: receipt });
+    expect(staleCompletion).toMatchObject({ status: "failed", failureReceipt: receipt });
+    expect(staleFailure).toMatchObject({ status: "failed", failureReceipt: receipt });
+  });
+
   it("restores the owner-scoped durable timing snapshot when no local job remains", async () => {
     const restored = { jobId: "restored-timing", ownerId, status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: 1_000, updatedAt: 9_000, completedAt: 9_000, expiresAt: Date.now() + 60_000, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 8_000, stages: [{ stage: "feature_extraction", label: "Feature extraction", startedAt: 1_000, endedAt: 9_000, durationMs: 8_000 }], advancedEta: null } };
     getAnalysisManifestMock.mockResolvedValue({ jobId: "restored-timing", ownerId, status: "completed", expiresAt: new Date(Date.now() + 60_000), completedAt: new Date(9_000), error: null, progressSnapshot: JSON.stringify(restored) });
