@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Activity, Boxes, Layers3, Network, Sparkles, TreePine } from "lucide-react";
-import React, { useState } from "react";
+import * as React from "react";
+import { useState } from "react";
 import type { Entity, Representation } from "./Home";
 
 function formatBytes(value: number) {

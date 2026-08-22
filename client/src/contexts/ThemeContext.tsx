@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useLayoutEffect, useState } from "react";
+import * as React from "react";
+import { createContext, useContext, useLayoutEffect, useState, type ReactNode } from "react";
 
 type Theme = "light" | "dark";
 
@@ -26,7 +27,7 @@ function applyDocumentTheme(theme: Theme) {
 }
 
 interface ThemeProviderProps {
-  children: React.ReactNode;
+  children: ReactNode;
   defaultTheme?: Theme;
   switchable?: boolean;
 }
