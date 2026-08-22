@@ -185,4 +185,4 @@
 - [x] Validate, document, checkpoint, synchronize, and deliver the pipeline audit and reliability release.
 - [x] Guard optional numeric fields in the deferred inspection studio so incomplete result records cannot call toFixed on undefined.
 - [x] Add a deferred-inspector regression for partial result fields and preserve workbench-level recovery behavior.
-- [ ] Validate, checkpoint, publish, and verify the inspector crash repair.
+- [x] Validate, checkpoint, publish, and verify the inspector crash repair.
