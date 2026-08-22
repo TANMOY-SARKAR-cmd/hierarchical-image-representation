@@ -183,3 +183,6 @@
 - [x] Surface an actionable private diagnostic token and add failure-attribution, lifecycle-race, UI, integration, local-smoke, and published-smoke regressions.
 - [x] Profile representative full-fidelity pipeline stages and repair only evidence-backed performance or lifecycle weaknesses.
 - [x] Validate, document, checkpoint, synchronize, and deliver the pipeline audit and reliability release.
+- [x] Guard optional numeric fields in the deferred inspection studio so incomplete result records cannot call toFixed on undefined.
+- [x] Add a deferred-inspector regression for partial result fields and preserve workbench-level recovery behavior.
+- [ ] Validate, checkpoint, publish, and verify the inspector crash repair.
