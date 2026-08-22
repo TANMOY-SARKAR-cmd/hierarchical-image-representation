@@ -101,8 +101,11 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
                 self.assertEqual(set(sparse.files), {"indices", "values", "shape", "quantizationStep"})
             self.assertTrue(all(entity.get("appearanceModel", {}).get("model") in {"constant", "affine", "quadratic"} for entity in representation["entities"] if entity["type"] == "micro_region"))
             self.assertTrue(all("boundaryResidual" in entity.get("appearanceModel", {}) for entity in representation["entities"] if entity["type"] == "micro_region"))
-            for relative_path in ("features.npz", "residuals.npz", "representation.json", "reconstructed.png", "reconstruction.svg", "overlays/relationship-graph.png", "reconstructions/level4.png", "reconstructions/parametric.png", "reconstructions/residual.png", "errors/residual-energy.png"):
+            for relative_path in ("features.npz", "residuals.npz", "representation.json", "reconstructed.png", "reconstruction.svg", "overlays/relationship-graph.png", "reconstructions/level4.png", "reconstructions/full.png", "reconstructions/parametric.png", "reconstructions/residual.png", "errors/residual-energy.png"):
                 self.assertTrue((output / relative_path).exists(), relative_path)
+            self.assertEqual((output / "reconstructions/full.png").read_bytes(), (output / "reconstructions/residual.png").read_bytes())
+            self.assertEqual((output / "reconstructed.png").read_bytes(), (output / "reconstructions/residual.png").read_bytes())
+            self.assertEqual(representation["reconstruction_metadata"]["outputs"]["full"]["model"], "adaptive_lab_plus_quantized_residual")
             heatmaps = representation["reconstruction_metadata"]["errorHeatmaps"]
             self.assertEqual(heatmaps["schema"], "CalibratedAbsoluteRgbErrorHeatmap@0.7")
             self.assertEqual(heatmaps["referenceMeanAbsoluteRgbDelta"], 32.0)

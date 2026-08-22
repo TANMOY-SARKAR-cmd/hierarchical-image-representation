@@ -104,6 +104,10 @@ Derived region, composite, and entity cuts can resolve to the same tree nodes in
 
 Every segmentation run records requested, raw, and final region counts together with `degenerate`, `fallbackAction`, and `maxInitialSegments`. A low-coherence SLIC result that collapses to too few regions is retried without connectivity enforcement and, if still degenerate, replaced by a deterministic connected grid partition. This fallback preserves a bounded inspectable partition; it does not claim perceptual or semantic meaning.
 
+## Reconstruction Modes and Appearance
+
+`constant` is the micro-region baseline. `parametric` is the adaptive CIELAB model, and `residual` is that model plus its bounded quantized correction. `full` and the primary `reconstructed.png` now both denote this final adaptive-plus-residual output; their artifact, exact error evidence, calibrated heatmap, and fidelity metrics therefore agree. The workbench defaults to its high-contrast scientific dark appearance and provides a persisted accessible header switch for a light alternative.
+
 Felzenszwalb and other high-cardinality outputs are reduced to the configured initial-region ceiling before pixel-feature entities or hierarchy candidates are built. The active global merge tree receives sparse 4-neighbour topology from the native label map and updates that topology after every accepted union, avoiding repeated all-pairs active-mask adjacency discovery. Child-process failures retain diagnostic stderr only in server logs; protected API clients receive a concise actionable failure message.
 
 ## Parameter-Sensitivity Evidence

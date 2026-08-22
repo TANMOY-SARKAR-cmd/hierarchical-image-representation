@@ -142,3 +142,6 @@
 - [x] Add secure browser-scoped anonymous workspace identity and visitor-capable analysis lifecycle procedures without weakening owner isolation.
 - [x] Remove forced Manus sign-in from the analysis button and explain current-browser result availability and expiry.
 - [x] Add anonymous workspace isolation, admission, cancellation, and UI regressions; validate, document, checkpoint, synchronize, and deliver.
+- [x] Make the `full` reconstruction artifact, metadata, exact evidence, heatmap, and workbench label represent the final adaptive-plus-residual fidelity output.
+- [x] Add a real persisted accessible light/dark appearance switch with theme-aware core workbench surfaces and controls.
+- [x] Add semantic and appearance regressions, validate, document, checkpoint, synchronize, and deliver the completion release.

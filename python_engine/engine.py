@@ -205,28 +205,27 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any], prog
     write_relationship_overlay(rgb, micro_regions, [edge for edge in relationships if edge.get("entityLevel") == 1], overlays_dir / "normalized-distance-graph.png", True)
     report("relationship_graph", 74, "Built sparse relationship graphs and hierarchy evidence.")
 
-    reconstruction_started = time.perf_counter(); reconstruction_groups = {"level1": micro_regions, "level2": regions, "level3": composites, "level4": entities_level, "full": micro_regions}; reconstruction_metadata: Dict[str, Any] = {}; reconstruction_images: Dict[str, np.ndarray] = {}
-    full_reconstruction = None
+    reconstruction_started = time.perf_counter(); reconstruction_groups = {"level1": micro_regions, "level2": regions, "level3": composites, "level4": entities_level}; reconstruction_metadata: Dict[str, Any] = {}; reconstruction_images: Dict[str, np.ndarray] = {}
     for name, entities in reconstruction_groups.items():
         reconstruction = reconstruct_entities(entities, masks, rgb.shape); Image.fromarray(reconstruction, mode="RGB").save(recon_dir / f"{name}.png")
         reconstruction_metadata[name] = {"artifact": f"reconstructions/{name}.png", "entityCount": len(entities), "model": "constant", **metrics_for(rgb, reconstruction)}
         reconstruction_images[name] = reconstruction
-        if name == "full": full_reconstruction = reconstruction
-    assert full_reconstruction is not None
-    constant_reconstruction = full_reconstruction
+    constant_reconstruction = reconstruction_images["level1"]
     fit_entity_models(micro_regions, masks, rgb, base_fields, config)
     parametric_reconstruction = reconstruct_adaptive(micro_regions, masks, rgb.shape)
     residual_reconstruction, quantized_residual, encoded_residual, residual_metadata = bounded_residual(rgb, parametric_reconstruction, config)
     Image.fromarray(constant_reconstruction, mode="RGB").save(recon_dir / "constant.png")
     Image.fromarray(parametric_reconstruction, mode="RGB").save(recon_dir / "parametric.png")
     Image.fromarray(residual_reconstruction, mode="RGB").save(recon_dir / "residual.png")
+    Image.fromarray(residual_reconstruction, mode="RGB").save(recon_dir / "full.png")
     if encoded_residual is not None:
         (output_dir / "residuals.npz").write_bytes(encoded_residual)
         residual_metadata["artifact"] = "residuals.npz"
     reconstruction_metadata["constant"] = {"artifact": "reconstructions/constant.png", "entityCount": len(micro_regions), "model": "constant", **metrics_for(rgb, constant_reconstruction)}
     reconstruction_metadata["parametric"] = {"artifact": "reconstructions/parametric.png", "entityCount": len(micro_regions), "model": "adaptive_lab", **metrics_for(rgb, parametric_reconstruction)}
     reconstruction_metadata["residual"] = {"artifact": "reconstructions/residual.png", "entityCount": len(micro_regions), "model": "adaptive_lab_plus_quantized_residual", "residual": residual_metadata, **metrics_for(rgb, residual_reconstruction)}
-    reconstruction_images.update({"constant": constant_reconstruction, "parametric": parametric_reconstruction, "residual": residual_reconstruction})
+    reconstruction_metadata["full"] = {"artifact": "reconstructions/full.png", "entityCount": len(micro_regions), "model": "adaptive_lab_plus_quantized_residual", "residual": residual_metadata, **metrics_for(rgb, residual_reconstruction)}
+    reconstruction_images.update({"constant": constant_reconstruction, "parametric": parametric_reconstruction, "residual": residual_reconstruction, "full": residual_reconstruction})
     full_reconstruction = residual_reconstruction
     Image.fromarray(full_reconstruction, mode="RGB").save(output_dir / "reconstructed.png")
     absolute_error = np.abs(rgb.astype(np.float32) - full_reconstruction.astype(np.float32)).mean(axis=2); per_region_error = np.zeros((height, width), dtype=np.float32)

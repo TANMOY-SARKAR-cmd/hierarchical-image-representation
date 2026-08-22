@@ -134,6 +134,20 @@
   }
 }
 
+/* The scientific workbench defaults to dark, while this scoped layer preserves
+   hierarchy and readable contrast when visitors choose the persisted light mode. */
+.hir-light {
+  color: oklch(0.22 0.02 248);
+  background-color: oklch(0.97 0.01 210);
+  background-image: radial-gradient(circle at 80% 0%, oklch(0.76 0.11 205 / 28%), transparent 30%);
+}
+.hir-light .bg-slate-950\/70, .hir-light .bg-slate-900\/80, .hir-light .bg-slate-900\/90, .hir-light .bg-black\/20, .hir-light .bg-black\/30 { background-color: oklch(0.99 0.005 220 / 92%) !important; }
+.hir-light .bg-cyan-300\/\[0\.035\], .hir-light .bg-cyan-300\/5 { background-color: oklch(0.94 0.035 205 / 72%) !important; }
+.hir-light .text-slate-100, .hir-light .text-slate-200, .hir-light .text-slate-300 { color: oklch(0.25 0.024 248) !important; }
+.hir-light .text-slate-400, .hir-light .text-slate-500 { color: oklch(0.44 0.025 245) !important; }
+.hir-light .border-white\/8, .hir-light .border-white\/10, .hir-light .border-cyan-100\/10 { border-color: oklch(0.73 0.04 210 / 70%) !important; }
+.hir-light .text-cyan-100, .hir-light .text-cyan-200, .hir-light .text-cyan-300 { color: oklch(0.43 0.11 215) !important; }
+
 @layer components {
   /**
    * Custom container utility that centers content and adds responsive padding.

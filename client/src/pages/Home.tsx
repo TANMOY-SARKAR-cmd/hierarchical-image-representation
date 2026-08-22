@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useTheme } from "@/contexts/ThemeContext";
 import { startLogin } from "@/const";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -20,6 +21,8 @@ import {
   Loader2,
   Network,
   ScanSearch,
+  Moon,
+  Sun,
   Sparkles,
   TreePine,
   UploadCloud,
@@ -277,6 +280,7 @@ function SegmentationDiagnosticsPanel({ representation }: { representation: Repr
 
 export default function Home() {
   const { user } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const isAdmin = user?.role === "admin";
   const [file, setFile] = useState<File | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
@@ -547,7 +551,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_80%_0%,rgba(21,185,207,0.10),transparent_30%)]">
+    <div className={cn("hir-workbench min-h-screen bg-[radial-gradient(circle_at_80%_0%,rgba(21,185,207,0.10),transparent_30%)]", theme === "light" && "hir-light")}>
       <header className="border-b border-cyan-200/10 bg-slate-950/70 px-4 py-3 backdrop-blur-xl sm:px-6">
         <div className="mx-auto flex max-w-[1680px] items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -563,6 +567,9 @@ export default function Home() {
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">analysis profile</div>
             <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 font-mono text-[10px] text-cyan-200">DETERMINISTIC · {(representation?.configuration?.segmentationStrategy ?? segmentationStrategy).toUpperCase()} + ENERGY TREE</div>
           </div>
+          <Button type="button" variant="outline" size="sm" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} appearance`} className="border-cyan-300/25 bg-cyan-300/5 text-cyan-200 hover:bg-cyan-300/15">
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}<span className="ml-1.5 font-mono text-[10px] uppercase">{theme}</span>
+          </Button>
         </div>
       </header>
 
