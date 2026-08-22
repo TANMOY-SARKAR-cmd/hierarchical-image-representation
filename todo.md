@@ -178,8 +178,8 @@
 - [x] Preserve finite normal/advanced budgets and post-bootstrap true-stall protection with clear last-stage failure reporting.
 - [x] Freeze terminal elapsed time in the workbench and add startup/liveness/UI/integration/smoke regressions.
 - [x] Validate, document, checkpoint, synchronize, and deliver the initialization-liveness reliability repair.
-- [ ] Add an owner-private bounded failure receipt that distinguishes admission, spawn, bootstrap, stage-silence, process-budget, cancellation, and finalization outcomes.
-- [ ] Make Python child timeout, error, cancellation, and close handling settle exactly once without stale terminal writes.
-- [ ] Surface an actionable private diagnostic token and add failure-attribution, lifecycle-race, UI, integration, local-smoke, and published-smoke regressions.
-- [ ] Profile representative full-fidelity pipeline stages and repair only evidence-backed performance or lifecycle weaknesses.
-- [ ] Validate, document, checkpoint, synchronize, and deliver the pipeline audit and reliability release.
+- [x] Add an owner-private bounded failure receipt that distinguishes admission, spawn, bootstrap, stage-silence, process-budget, cancellation, and finalization outcomes.
+- [x] Make Python child timeout, error, cancellation, and close handling settle exactly once without stale terminal writes.
+- [x] Surface an actionable private diagnostic token and add failure-attribution, lifecycle-race, UI, integration, local-smoke, and published-smoke regressions.
+- [x] Profile representative full-fidelity pipeline stages and repair only evidence-backed performance or lifecycle weaknesses.
+- [x] Validate, document, checkpoint, synchronize, and deliver the pipeline audit and reliability release.
