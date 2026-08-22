@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 
   <head>
     <meta charset="UTF-8" />
@@ -7,10 +7,28 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1" />
     <title>Hierarchical Image Representation</title>    
+    <script>
+      (function () {
+        try {
+          var theme = window.localStorage.getItem("theme");
+          document.documentElement.classList.toggle("dark", theme !== "light");
+        } catch (_) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main id="app-loading" class="app-loading" aria-live="polite">
+        <section class="app-loading__panel">
+          <p class="app-loading__eyebrow">Scientific visual computing</p>
+          <h1>Hierarchical Image Workbench</h1>
+          <p>Loading the private, server-side analysis workbench.</p>
+        </section>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <script
       defer

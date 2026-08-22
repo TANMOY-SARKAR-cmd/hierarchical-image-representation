@@ -43,6 +43,7 @@
 }
 
 :root {
+  color-scheme: dark;
   --primary: var(--color-blue-700);
   --primary-foreground: var(--color-blue-50);
   --sidebar-primary: var(--color-blue-600);
@@ -113,12 +114,23 @@
   --sidebar-ring: oklch(0.78 0.16 195);
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+html {
+  background: oklch(0.085 0.016 250);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
     background-image: radial-gradient(circle at 20% -10%, oklch(0.28 0.08 230 / 22%), transparent 36%), linear-gradient(180deg, oklch(0.11 0.018 250), oklch(0.085 0.016 250));
   }
   button:not(:disabled),
@@ -132,6 +144,47 @@
   input[type="radio"]:not(:disabled) {
     @apply cursor-pointer;
   }
+}
+
+.app-loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1.5rem;
+  color: oklch(0.92 0.015 220);
+  background:
+    radial-gradient(circle at 20% -10%, oklch(0.28 0.08 230 / 22%), transparent 36%),
+    linear-gradient(180deg, oklch(0.11 0.018 250), oklch(0.085 0.016 250));
+}
+
+.app-loading__panel {
+  width: min(100%, 36rem);
+  border: 1px solid oklch(0.78 0.16 195 / 28%);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  background: oklch(0.16 0.022 248 / 88%);
+  box-shadow: 0 24px 70px oklch(0.03 0.01 250 / 38%);
+}
+
+.app-loading__panel h1 {
+  margin: 0.45rem 0 0;
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+
+.app-loading__panel p:last-child {
+  margin: 0.5rem 0 0;
+  color: oklch(0.68 0.025 220);
+  font-size: 0.875rem;
+}
+
+.app-loading__eyebrow {
+  margin: 0;
+  color: oklch(0.78 0.16 195);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 /* The scientific workbench defaults to dark, while this scoped layer preserves

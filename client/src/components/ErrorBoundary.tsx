@@ -21,21 +21,26 @@ class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
+  componentDidCatch(error: Error) {
+    console.error("[Workbench render recovery]", error);
+  }
+
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex items-center justify-center min-h-screen p-8 bg-background">
-          <div className="flex flex-col items-center w-full max-w-2xl p-8">
+        <div className="flex min-h-screen items-center justify-center bg-slate-950 p-8 text-slate-100">
+          <div className="flex w-full max-w-2xl flex-col items-center rounded-xl border border-amber-300/25 bg-slate-900/90 p-8 shadow-2xl shadow-black/30">
             <AlertTriangle
               size={48}
               className="text-destructive mb-6 flex-shrink-0"
             />
 
-            <h2 className="text-xl mb-4">An unexpected error occurred.</h2>
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-200">Workbench recovery</p>
+            <h2 className="mb-4 mt-2 text-xl font-semibold">The workbench could not finish loading.</h2>
 
-            <div className="p-4 w-full rounded bg-muted overflow-auto mb-6">
-              <pre className="text-sm text-muted-foreground whitespace-break-spaces">
-                {this.state.error?.stack}
+            <div className="mb-6 w-full overflow-auto rounded border border-white/10 bg-black/20 p-4">
+              <pre className="whitespace-break-spaces text-sm text-slate-400">
+                {this.state.error?.message || "Refresh the page to retry loading the workbench."}
               </pre>
             </div>
 
@@ -43,7 +48,7 @@ class ErrorBoundary extends Component<Props, State> {
               onClick={() => window.location.reload()}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-lg",
-                "bg-primary text-primary-foreground",
+                "bg-cyan-300 text-slate-950",
                 "hover:opacity-90 cursor-pointer"
               )}
             >

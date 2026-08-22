@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AnalysisAdmissionError, AnalysisCancelledError, AnalysisEngineError, AnalysisInputError, analyzeImage, cancelAnalysisJob, discardAnalysisResult, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, getLocalErrorSample, getThresholdedErrorHeatmap, startAnalysisJob } from "../imageAnalysis";
 import { adminProcedure, publicProcedure, router } from "../_core/trpc";
 import { resolveAnalysisOwner, visitorAdmissionKey } from "../analysisVisitor";
+import { listRetainedTimingManifests } from "../db";
 
 const analysisConfig = z.object({
   maxFileSizeBytes: z.number().int().min(256 * 1024).max(32 * 1024 * 1024).default(8 * 1024 * 1024),
@@ -72,6 +73,39 @@ const analysisInput = z.object({
 
 function safeUnexpectedAnalysisMessage() {
   return "The analysis service could not complete this request. Please retry shortly.";
+}
+
+type TimingPayload = {
+  representation?: {
+    image?: { width?: number; height?: number };
+    configuration?: { segmentationStrategy?: string; reconstructionProfile?: string };
+    metrics?: { processingTimeMs?: number };
+    executionTiming?: { totalDurationMs?: number; stages?: Array<{ stage?: string; label?: string; durationMs?: number }> };
+    parameterSensitivity?: { records?: unknown[] } | null;
+  };
+};
+
+function normalizeTimingHistoryRecord(manifest: Awaited<ReturnType<typeof listRetainedTimingManifests>>[number]) {
+  if (!manifest.payload) return null;
+  try {
+    const parsed = JSON.parse(manifest.payload) as TimingPayload;
+    const representation = parsed.representation;
+    const timing = representation?.executionTiming;
+    if (!timing?.stages?.length) return null;
+    return {
+      jobId: manifest.jobId,
+      completedAt: manifest.completedAt?.getTime() ?? null,
+      expiresAt: manifest.expiresAt.getTime(),
+      image: { width: representation?.image?.width ?? null, height: representation?.image?.height ?? null },
+      configuration: { segmentationStrategy: representation?.configuration?.segmentationStrategy ?? "unknown", reconstructionProfile: representation?.configuration?.reconstructionProfile ?? "unknown" },
+      processingTimeMs: representation?.metrics?.processingTimeMs ?? timing.totalDurationMs ?? 0,
+      totalDurationMs: timing.totalDurationMs ?? 0,
+      sensitivityVariantCount: representation?.parameterSensitivity?.records?.length ?? 0,
+      stages: timing.stages.map(stage => ({ stage: stage.stage ?? "unknown", label: stage.label ?? stage.stage ?? "Unknown stage", durationMs: stage.durationMs ?? 0 })),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export const imageAnalysisRouter = router({
@@ -159,6 +193,10 @@ export const imageAnalysisRouter = router({
     const result = await getAnalysisResult(input.jobId);
     if (!result || result.ownerId !== resolveAnalysisOwner(ctx)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current browser." });
     return result.artifactUrls;
+  }),
+  timingHistory: publicProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(25) }).optional()).query(async ({ input, ctx }) => {
+    const manifests = await listRetainedTimingManifests(resolveAnalysisOwner(ctx), input?.limit ?? 25);
+    return manifests.map(normalizeTimingHistoryRecord).filter((record): record is NonNullable<typeof record> => Boolean(record));
   }),
   cancel: publicProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input, ctx }) => {
     const ownerId = resolveAnalysisOwner(ctx); const job = await cancelAnalysisJob(input.jobId, ownerId);

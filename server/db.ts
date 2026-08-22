@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { analysisManifests, InsertUser, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -127,6 +127,30 @@ export async function getAnalysisManifest(jobId: string) {
   if (!db) return null;
   const rows = await db.select().from(analysisManifests).where(eq(analysisManifests.jobId, jobId)).limit(1);
   return rows[0] ?? null;
+}
+
+export type RetainedTimingManifest = {
+  jobId: string;
+  completedAt: Date | null;
+  expiresAt: Date;
+  payload: string | null;
+};
+
+/** Lists only currently accessible completed records for one normalized owner. */
+export async function listRetainedTimingManifests(ownerId: string, limit = 25, now = new Date()): Promise<RetainedTimingManifest[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  return db.select({
+    jobId: analysisManifests.jobId,
+    completedAt: analysisManifests.completedAt,
+    expiresAt: analysisManifests.expiresAt,
+    payload: analysisManifests.payload,
+  }).from(analysisManifests).where(and(
+    eq(analysisManifests.ownerId, ownerId),
+    eq(analysisManifests.status, "completed"),
+    gt(analysisManifests.expiresAt, now),
+  )).orderBy(desc(analysisManifests.completedAt)).limit(boundedLimit);
 }
 
 export async function discardAnalysisManifest(jobId: string, ownerId: string, now = new Date()): Promise<boolean> {

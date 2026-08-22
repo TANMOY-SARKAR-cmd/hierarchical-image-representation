@@ -163,3 +163,8 @@
 - [x] Defer result-only inspection panels and split durable vendor/application bundles without delaying first-use analysis controls.
 - [x] Add local and deployed regressions for ETA visualization, expandable stage detail, lazy inspectors, and build chunking.
 - [x] Validate, document, checkpoint, synchronize, and deliver the ETA visual-progress and bundle-splitting release.
+- [ ] Recover a resilient non-white first paint, validate persisted theme state, and show an actionable rendering-recovery surface.
+- [ ] Defer heavy completed-result inspection and comparison modules until the user explicitly opens them.
+- [ ] Add bounded owner-private retained timing history and CSV/JSON timing-comparison downloads.
+- [ ] Add UI, router, retention, report-format, bundle, and published-lifecycle regressions for the rendering/performance/export release.
+- [ ] Validate, document, checkpoint, synchronize, and deliver the rendering recovery, deferred-inspector, and timing-history export release.

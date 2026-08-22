@@ -31,7 +31,7 @@ import React, { ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner";
 
 type Geometry = { boundingBox: number[]; centroid: number[]; area: number; perimeter: number; orientation: number; compactness: number };
-type Entity = {
+export type Entity = {
   id: string;
   type: string;
   level: number;
@@ -48,7 +48,7 @@ type Entity = {
   lineage?: { operation: string; parents: string[]; mergeEvidence?: { energy?: { deltaJ: number; deltaDistortion: number; deltaRate: number; deltaBoundary: number; deltaShape: number; deltaComplexity: number } } };
   appearanceModel?: { schema: string; model: "constant" | "affine" | "quadratic"; parameterCount: number; mseLab: number; selectionScore: number; boundaryResidual?: number; boundaryLeakage?: number; coefficients: number[][] };
 };
-type Relationship = {
+export type Relationship = {
   sourceId: string;
   targetId: string;
   distance: number;
@@ -77,7 +77,7 @@ type Relationship = {
   candidateSources?: string[];
 };
 type EdgeFilter = { relationshipTypes: string[]; adjacentOnly: boolean; minimumConfidence: number; maximumNormalizedDistance: number };
-type Representation = {
+export type Representation = {
   image: { width: number; height: number; sourceBytes: number };
   configuration?: { segmentationStrategy?: "slic" | "watershed" | "felzenszwalb"; reconstructionProfile?: "fast" | "balanced" | "accurate"; mergeEnergyThreshold?: number };
   entities: Entity[];
@@ -105,6 +105,9 @@ type AdvancedEtaRange = { minimumRemainingMs: number; maximumRemainingMs: number
 type AnalysisJobStatus = { jobId: string; status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled" | "expired"; stage: string; percent: number; message: string; createdAt: number; updatedAt: number; completedAt: number | null; expiresAt: number; error: string | null; resultAvailable: boolean; timing?: { schema: string; totalElapsedMs: number; stages: AnalysisStageTiming[]; advancedEta: AdvancedEtaRange | null } };
 
 const DeferredExecutionTimeline = React.lazy(() => import("./ExecutionTimeline"));
+const DeferredResultInspectionStudio = React.lazy(() => import("./ResultInspectionStudio"));
+const DeferredTimingHistoryExport = React.lazy(() => import("./TimingHistoryExport"));
+const renderLegacyInspectorMarkup = false as boolean;
 
 const overlays = [
   { id: "none", label: "Native source" },
@@ -338,6 +341,8 @@ export default function Home() {
   const [minimumConfidence, setMinimumConfidence] = useState(0);
   const [maximumNormalizedDistance, setMaximumNormalizedDistance] = useState(1);
   const [activeHierarchyCut, setActiveHierarchyCut] = useState<"full" | "region" | "composite" | "entity">("full");
+  const [showInspectionStudio, setShowInspectionStudio] = useState(false);
+  const [showTimingHistory, setShowTimingHistory] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [appliedResultJobId, setAppliedResultJobId] = useState<string | null>(null);
   const [reportedFailureJobId, setReportedFailureJobId] = useState<string | null>(null);
@@ -545,6 +550,8 @@ export default function Home() {
       setActiveJobId(job.jobId);
       setAppliedResultJobId(null);
       setReportedFailureJobId(null);
+      setShowInspectionStudio(false);
+      setShowTimingHistory(false);
       setReconstructionLevel("constant");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The analysis could not be completed.");
@@ -574,6 +581,8 @@ export default function Home() {
     try {
       await discardMutation.mutateAsync({ jobId: activeJobId });
       setRepresentation(null); setArtifacts(null); setSelectedId(null); setActiveJobId(null); setAppliedResultJobId(null);
+      setShowInspectionStudio(false);
+      setShowTimingHistory(false);
       toast.success("Analysis access was discarded. Artifact references are no longer available through this workbench.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The analysis could not be discarded.");
@@ -665,11 +674,13 @@ export default function Home() {
             <div className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><TreePine className="h-4 w-4 text-cyan-300" /> Hierarchy navigator</div>{root ? <div className="max-h-[365px] overflow-auto pr-1"><TreeNode entity={root} entities={entities} selectedId={selectedId} onSelect={setSelectedId} /></div> : <div className="flex h-48 items-center justify-center rounded border border-dashed border-white/10 font-mono text-xs text-slate-600">NO ENTITY TREE LOADED</div>}</div>
             <div className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><Download className="h-4 w-4 text-cyan-300" /> Exports</div><div className="space-y-2">{artifacts ? <><a href={artifacts.representationJson} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5 text-xs text-slate-300 hover:border-cyan-300/30 hover:bg-cyan-300/[0.06]"><FileJson2 className="h-4 w-4 text-amber-300" /><span>Representation JSON</span><Download className="ml-auto h-3.5 w-3.5 text-slate-500" /></a><a href={artifacts.featuresNpz} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5 text-xs text-slate-300 hover:border-cyan-300/30 hover:bg-cyan-300/[0.06]"><FileArchive className="h-4 w-4 text-violet-300" /><span>Feature arrays (.npz)</span><Download className="ml-auto h-3.5 w-3.5 text-slate-500" /></a><a href={artifacts.reconstructedPng} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5 text-xs text-slate-300 hover:border-cyan-300/30 hover:bg-cyan-300/[0.06]"><FileImage className="h-4 w-4 text-emerald-300" /><span>Reconstructed PNG</span><Download className="ml-auto h-3.5 w-3.5 text-slate-500" /></a><a href={artifacts.svg} className="flex items-center gap-3 rounded-md border border-white/8 bg-white/[0.025] px-3 py-2.5 text-xs text-slate-300 hover:border-cyan-300/30 hover:bg-cyan-300/[0.06]"><FileImage className="h-4 w-4 text-cyan-300" /><span>Region-boundary SVG</span><Download className="ml-auto h-3.5 w-3.5 text-slate-500" /></a></> : <p className="rounded border border-dashed border-white/10 p-4 text-xs leading-relaxed text-slate-500">Artifact exports are generated after a successful run.</p>}</div></div>
           </section></> : null}
+          {hasCompletedResult ? <section className="rounded-xl border border-violet-200/15 bg-slate-900/80 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-violet-100">Detailed inspection studio</h2><p className="mt-1 text-[11px] leading-relaxed text-slate-500">Hierarchy, entity, relationship, reconstruction, diagnostic, and sensitivity inspectors load only when opened.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setShowInspectionStudio(value => !value)} aria-expanded={showInspectionStudio} className="border-violet-300/30 bg-violet-300/[0.04] font-mono text-[10px] text-violet-100 hover:bg-violet-300/[0.12]">{showInspectionStudio ? "Close inspection studio" : "Open inspection studio"}</Button></div>{showInspectionStudio ? <React.Suspense fallback={<div role="status" className="mt-3 rounded border border-violet-300/15 bg-violet-300/[0.03] p-3 text-xs text-violet-100">Loading detailed result inspectors…</div>}><div className="mt-4"><DeferredResultInspectionStudio representation={representation!} selectedId={selectedId} onSelect={setSelectedId} activeCut={activeHierarchyCut} onCutChange={setActiveHierarchyCut} parameterSensitivityUrl={artifacts?.parameterSensitivity} /></div></React.Suspense> : null}</section> : null}
+          {hasCompletedResult ? <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-cyan-100">Timing-comparison reports</h2><p className="mt-1 text-[11px] leading-relaxed text-slate-500">Load retained private timing history only when you want to compare or download it.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setShowTimingHistory(value => !value)} aria-expanded={showTimingHistory} className="border-cyan-300/25 bg-cyan-300/[0.04] font-mono text-[10px] text-cyan-100 hover:bg-cyan-300/[0.12]">{showTimingHistory ? "Close timing history" : "Open timing history"}</Button></div>{showTimingHistory ? <React.Suspense fallback={<div role="status" className="mt-3 rounded border border-cyan-300/15 bg-cyan-300/[0.03] p-3 text-xs text-cyan-100">Loading retained timing history…</div>}><div className="mt-4"><DeferredTimingHistoryExport /></div></React.Suspense> : null}</section> : null}
         </section>
 
         <aside className="hidden space-y-4 xl:sticky xl:top-4 xl:self-start xl:block">
           {isAdmin ? <RuntimeTelemetryPanel telemetry={telemetryQuery.data as CacheRetentionTelemetry | undefined} isLoading={telemetryQuery.isLoading} /> : null}
-          {hasCompletedResult ? <><MergeTreePanel representation={representation} selectedEntity={selectedEntity} activeCut={activeHierarchyCut} onCutChange={setActiveHierarchyCut} onSelect={setSelectedId} />
+          {representation && renderLegacyInspectorMarkup ? <><MergeTreePanel representation={representation} selectedEntity={selectedEntity} activeCut={activeHierarchyCut} onCutChange={setActiveHierarchyCut} onSelect={setSelectedId} />
           <V03InspectionPanels representation={representation} selectedEntity={selectedEntity} />
           <V04ReconstructionPanel representation={representation} selectedEntity={selectedEntity} />
           <SegmentationDiagnosticsPanel representation={representation} />

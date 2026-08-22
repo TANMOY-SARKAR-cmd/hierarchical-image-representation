@@ -232,7 +232,8 @@ describe("Hierarchy workbench UI", () => {
       const view = render(<Home />);
       fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
       fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
-      await view.findByText("Relationships · 2");
+      fireEvent.click(await view.findByRole("button", { name: "Open inspection studio" }));
+      await view.findByText("Relational context");
       expect(consoleError.mock.calls.flat().join(" ")).not.toMatch(/same key|unique key/i);
     } finally {
       consoleError.mockRestore();
@@ -267,13 +268,13 @@ describe("Hierarchy workbench UI", () => {
     fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
     await view.findByRole("button", { name: "adjacent" });
     expect(view.getByText("2/2")).toBeInTheDocument();
-    expect(view.getByText("Adaptive reconstruction")).toBeInTheDocument();
-    expect(view.getByText("Global merge tree")).toBeInTheDocument();
-    expect(view.getByRole("button", { name: /Region\s*1/i })).toBeInTheDocument();
+    expect(view.queryByText("Adaptive reconstruction")).not.toBeInTheDocument();
+    fireEvent.click(view.getByRole("button", { name: "Open inspection studio" }));
+    expect(await view.findByText("Adaptive reconstruction")).toBeInTheDocument();
+    expect(await view.findByText("Global merge tree")).toBeInTheDocument();
+    expect(await view.findByRole("button", { name: /Region\s*1/i })).toBeInTheDocument();
     fireEvent.click(view.getByRole("button", { name: /Region\s*1/i }));
     expect(view.getByText(/Derived-cut nodes · target 1/i)).toBeInTheDocument();
-    expect(view.getByText("Heuristic model score")).toBeInTheDocument();
-    expect(view.getByText("Actual emitted storage")).toBeInTheDocument();
     expect(view.getByText("Segmentation diagnostics")).toBeInTheDocument();
     expect(view.getByText("72 regions")).toBeInTheDocument();
     expect(view.getByRole("link", { name: /download residual npz/i })).toHaveAttribute("href", "/residuals.npz");

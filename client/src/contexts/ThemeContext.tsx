@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useLayoutEffect, useState } from "react";
 
 type Theme = "light" | "dark";
 
@@ -9,6 +9,21 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+
+function readStoredTheme(defaultTheme: Theme): Theme {
+  if (typeof window === "undefined") return defaultTheme;
+  try {
+    const stored = window.localStorage.getItem("theme");
+    return stored === "light" || stored === "dark" ? stored : defaultTheme;
+  } catch {
+    return defaultTheme;
+  }
+}
+
+function applyDocumentTheme(theme: Theme) {
+  if (typeof document === "undefined") return;
+  document.documentElement.classList.toggle("dark", theme === "dark");
+}
 
 interface ThemeProviderProps {
   children: React.ReactNode;
@@ -22,23 +37,20 @@ export function ThemeProvider({
   switchable = false,
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
-    if (switchable) {
-      const stored = localStorage.getItem("theme");
-      return (stored as Theme) || defaultTheme;
-    }
-    return defaultTheme;
+    const resolved = switchable ? readStoredTheme(defaultTheme) : defaultTheme;
+    applyDocumentTheme(resolved);
+    return resolved;
   });
 
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
+  useLayoutEffect(() => {
+    applyDocumentTheme(theme);
 
     if (switchable) {
-      localStorage.setItem("theme", theme);
+      try {
+        window.localStorage.setItem("theme", theme);
+      } catch {
+        // Browser storage is optional; the in-memory theme remains functional.
+      }
     }
   }, [theme, switchable]);
 
