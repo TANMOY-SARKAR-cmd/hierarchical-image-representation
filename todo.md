@@ -145,8 +145,8 @@
 - [x] Make the `full` reconstruction artifact, metadata, exact evidence, heatmap, and workbench label represent the final adaptive-plus-residual fidelity output.
 - [x] Add a real persisted accessible light/dark appearance switch with theme-aware core workbench surfaces and controls.
 - [x] Add semantic and appearance regressions, validate, document, checkpoint, synchronize, and deliver the completion release.
-- [ ] Add observable anonymous job liveness, terminal-timeout handling, and safe expected-anonymous request logging.
-- [ ] Enforce and verify access-only expiry and discard revocation across result, artifact, hierarchy, relationship, local-error, and heatmap procedures.
-- [ ] Refine first-use onboarding with essential controls, explicit terminology, and post-result progressive disclosure on desktop and mobile.
-- [ ] Add local anonymous lifecycle and browser-workflow regressions plus a bounded deployed anonymous end-to-end smoke suite.
-- [ ] Validate, document the access-only retention boundary, checkpoint, synchronize, and deliver the live-completion release.
+- [x] Add observable anonymous job liveness, terminal-timeout handling, and safe expected-anonymous request logging.
+- [x] Enforce and verify access-only expiry and discard revocation across result, artifact, hierarchy, relationship, local-error, and heatmap procedures.
+- [x] Refine first-use onboarding with essential controls, explicit terminology, and post-result progressive disclosure on desktop and mobile.
+- [x] Add local anonymous lifecycle and browser-workflow regressions plus a bounded deployed anonymous end-to-end smoke suite.
+- [x] Validate, document the access-only retention boundary, checkpoint, synchronize, and deliver the live-completion release.
