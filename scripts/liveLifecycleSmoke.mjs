@@ -9,7 +9,7 @@ if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) {
 
 const runSensitivity = process.env.HIR_SMOKE_SENSITIVITY === "1";
 const timeoutMs = Number.parseInt(process.env.HIR_SMOKE_TIMEOUT_MS ?? (runSensitivity ? "480000" : "150000"), 10);
-const pollMs = runSensitivity ? 350 : 800;
+const pollMs = Number.parseInt(process.env.HIR_SMOKE_POLL_MS ?? (runSensitivity ? "75" : "800"), 10);
 
 function makeFixture() {
   const image = new PNG({ width: 64, height: 48 });
@@ -112,9 +112,6 @@ try {
   if (terminal.job.status !== "completed" || !terminal.job.resultAvailable) {
     throw new Error("The live job did not produce an available completed result.");
   }
-  if (runSensitivity && !terminal.observedStages.includes("sensitivity")) {
-    throw new Error("The advanced smoke job completed without exposing its sensitivity stage.");
-  }
 
   summary.failedAt = "cross-browser isolation";
   await expectDenied("Cross-browser status", () => isolatedClient.imageAnalysis.status.query({ jobId: started.jobId }));
@@ -122,6 +119,13 @@ try {
 
   summary.failedAt = "result";
   const result = await client.imageAnalysis.result.query({ jobId: started.jobId });
+  if (runSensitivity) {
+    const records = result.representation?.parameterSensitivity?.records;
+    if (!Array.isArray(records) || records.length !== 5) {
+      throw new Error("The advanced smoke job did not return the expected five-record sensitivity report.");
+    }
+    summary.verification.push("five-variant sensitivity report");
+  }
   const entities = Array.isArray(result.representation?.entities) ? result.representation.entities : [];
   const firstEntity = entities[0];
   const mode = "constant";
