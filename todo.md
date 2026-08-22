@@ -139,3 +139,6 @@
 - [x] Sanitize public engine errors and remove duplicate residual-energy artifact storage writes.
 - [x] Add browser drag/drop, pixel-dimension preflight, minimum-region control, accurate segmentation labels, and result diagnostics.
 - [x] Validate, document, checkpoint, synchronize, and deliver the completed stress-remediation release.
+- [x] Add secure browser-scoped anonymous workspace identity and visitor-capable analysis lifecycle procedures without weakening owner isolation.
+- [x] Remove forced Manus sign-in from the analysis button and explain current-browser result availability and expiry.
+- [x] Add anonymous workspace isolation, admission, cancellation, and UI regressions; validate, document, checkpoint, synchronize, and deliver.

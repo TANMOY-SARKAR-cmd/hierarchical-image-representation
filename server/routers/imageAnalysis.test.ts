@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../imageAnalysis", () => ({
   AnalysisAdmissionError: class AnalysisAdmissionError extends Error {},
   AnalysisCancelledError: class AnalysisCancelledError extends Error {},
+  AnalysisEngineError: class AnalysisEngineError extends Error {},
   AnalysisInputError: class AnalysisInputError extends Error {},
   analyzeImage: vi.fn(),
   cancelAnalysisJob: vi.fn(),
@@ -70,7 +71,7 @@ describe("imageAnalysis router", () => {
     const caller = imageAnalysisRouter.createCaller(userContext);
     const response = await caller.process(baseInput);
 
-    expect(analyzeImage).toHaveBeenCalledWith(expect.objectContaining({ ...baseInput, config: expect.objectContaining(baseInput.config) }), "1", "user:1");
+    expect(analyzeImage).toHaveBeenCalledWith(expect.objectContaining({ ...baseInput, config: expect.objectContaining(baseInput.config) }), "1", expect.stringMatching(/^1:client:/));
     expect(response.jobId).toBe("job-123");
   });
 
@@ -90,13 +91,16 @@ describe("imageAnalysis router", () => {
     await expect(owner.start(baseInput)).resolves.toEqual(queued);
     await expect(owner.status({ jobId: "job-progress" })).resolves.toEqual(queued);
     await expect(otherUser.status({ jobId: "job-progress" })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(startAnalysisJob).toHaveBeenCalledWith(expect.objectContaining({ ...baseInput, config: expect.objectContaining(baseInput.config) }), "1", "user:1");
+    expect(startAnalysisJob).toHaveBeenCalledWith(expect.objectContaining({ ...baseInput, config: expect.objectContaining(baseInput.config) }), "1", expect.stringMatching(/^1:client:/));
   });
 
-  it("requires authentication for analysis submission and result inspection", async () => {
-    const anonymous = imageAnalysisRouter.createCaller({ user: null } as never);
-    await expect(anonymous.process(baseInput)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-    await expect(anonymous.result({ jobId: "missing" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  it("accepts a no-login visitor analysis within an opaque browser workspace", async () => {
+    vi.mocked(analyzeImage).mockResolvedValue({ jobId: "visitor-job", ownerId: "visitor:opaque", representation: { version: "0.7.0" }, artifactUrls: { representationJson: "/result.json", featuresNpz: "/features.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: {}, reconstructions: {}, errors: {} } });
+    const setCookie = vi.fn();
+    const anonymous = imageAnalysisRouter.createCaller({ user: null, req: { headers: {} }, res: { cookie: setCookie } } as never);
+    await expect(anonymous.process(baseInput)).resolves.toMatchObject({ jobId: "visitor-job" });
+    expect(analyzeImage).toHaveBeenCalledWith(expect.any(Object), expect.stringMatching(/^visitor:/), expect.stringContaining("visitor:"));
+    expect(setCookie).toHaveBeenCalledTimes(1);
   });
 
   it("returns a not-found error for an unavailable owned in-memory result", async () => {

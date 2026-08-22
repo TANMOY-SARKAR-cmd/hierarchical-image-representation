@@ -461,11 +461,6 @@ export default function Home() {
   }
 
   async function runAnalysis() {
-    if (!user) {
-      toast.error("Sign in to run and inspect a private image analysis.");
-      startLogin();
-      return;
-    }
     if (!file) {
       toast.error("Select an image before starting analysis.");
       return;
@@ -581,6 +576,7 @@ export default function Home() {
               <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-500">PNG · JPEG · WebP · ≤786,432 px</span>
               <Input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={changeFile} />
             </label>
+            <p className="mt-2 text-[10px] leading-relaxed text-slate-500">No sign-in required. Results remain private to this browser, expire automatically, and can be discarded after inspection.</p>
             {file ? <div className="mt-3 rounded-md border border-white/8 bg-black/20 px-3 py-2 text-xs"><p className="truncate font-medium text-slate-200">{file.name}</p><p className="mt-0.5 font-mono text-[10px] text-slate-500">{formatBytes(file.size)} · {file.type.replace("image/", "").toUpperCase()}</p></div> : null}
           </section>
 

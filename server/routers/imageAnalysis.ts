@@ -1,7 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { AnalysisAdmissionError, AnalysisCancelledError, AnalysisEngineError, AnalysisInputError, analyzeImage, cancelAnalysisJob, discardAnalysisResult, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, getLocalErrorSample, getThresholdedErrorHeatmap, startAnalysisJob } from "../imageAnalysis";
-import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
+import { adminProcedure, publicProcedure, router } from "../_core/trpc";
+import { resolveAnalysisOwner, visitorAdmissionKey } from "../analysisVisitor";
 
 const analysisConfig = z.object({
   maxFileSizeBytes: z.number().int().min(256 * 1024).max(32 * 1024 * 1024).default(8 * 1024 * 1024),
@@ -70,11 +71,12 @@ const analysisInput = z.object({
 });
 
 export const imageAnalysisRouter = router({
-  process: protectedProcedure
+  process: publicProcedure
     .input(analysisInput)
     .mutation(async ({ input, ctx }) => {
       try {
-        const { errorEvidence: _privateEvidence, ...publicResult } = await analyzeImage(input, String(ctx.user.id), admissionKey(ctx));
+        const ownerId = resolveAnalysisOwner(ctx);
+        const { errorEvidence: _privateEvidence, ...publicResult } = await analyzeImage(input, ownerId, visitorAdmissionKey(ctx, ownerId));
         return publicResult;
       } catch (error) {
         if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
@@ -87,9 +89,10 @@ export const imageAnalysisRouter = router({
         });
       }
     }),
-  start: protectedProcedure.input(analysisInput).mutation(async ({ input, ctx }) => {
+  start: publicProcedure.input(analysisInput).mutation(async ({ input, ctx }) => {
     try {
-      return await startAnalysisJob(input, String(ctx.user.id), admissionKey(ctx));
+      const ownerId = resolveAnalysisOwner(ctx);
+      return await startAnalysisJob(input, ownerId, visitorAdmissionKey(ctx, ownerId));
     } catch (error) {
       if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
       if (error instanceof AnalysisInputError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
@@ -97,43 +100,43 @@ export const imageAnalysisRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Image analysis could not be started." });
     }
   }),
-  status: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
+  status: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
     const job = await getAnalysisJob(input.jobId);
-    if (!job || job.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis job is not available to the current user." });
+    if (!job || job.ownerId !== resolveAnalysisOwner(ctx)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis job is not available to the current browser." });
     return job;
   }),
-  result: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
+  result: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
     const result = await getAnalysisResult(input.jobId);
-    if (!result || result.ownerId !== String(ctx.user.id)) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
+    if (!result || result.ownerId !== resolveAnalysisOwner(ctx)) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current browser." });
     }
     const { errorEvidence: _privateEvidence, ...publicResult } = result;
     return publicResult;
   }),
-  localError: protectedProcedure.input(z.object({ jobId: z.string().min(1), mode: z.string().min(1).max(32), x: z.number().int().min(0).max(2_000_000), y: z.number().int().min(0).max(2_000_000) })).query(async ({ input, ctx }) => {
+  localError: publicProcedure.input(z.object({ jobId: z.string().min(1), mode: z.string().min(1).max(32), x: z.number().int().min(0).max(2_000_000), y: z.number().int().min(0).max(2_000_000) })).query(async ({ input, ctx }) => {
     try {
-      return await getLocalErrorSample(input.jobId, String(ctx.user.id), input.mode, input.x, input.y);
+      return await getLocalErrorSample(input.jobId, resolveAnalysisOwner(ctx), input.mode, input.x, input.y);
     } catch (error) {
       throw new TRPCError({ code: "NOT_FOUND", message: error instanceof Error ? error.message : "Exact error evidence is unavailable." });
     }
   }),
-  thresholdedHeatmap: protectedProcedure.input(z.object({ jobId: z.string().min(1), mode: z.string().min(1).max(32), thresholdDelta: z.number().int().min(0).max(32) })).query(async ({ input, ctx }) => {
+  thresholdedHeatmap: publicProcedure.input(z.object({ jobId: z.string().min(1), mode: z.string().min(1).max(32), thresholdDelta: z.number().int().min(0).max(32) })).query(async ({ input, ctx }) => {
     try {
-      return await getThresholdedErrorHeatmap(input.jobId, String(ctx.user.id), input.mode, input.thresholdDelta);
+      return await getThresholdedErrorHeatmap(input.jobId, resolveAnalysisOwner(ctx), input.mode, input.thresholdDelta);
     } catch (error) {
       throw new TRPCError({ code: "NOT_FOUND", message: error instanceof Error ? error.message : "Thresholded error heatmap is unavailable." });
     }
   }),
-  entity: protectedProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1) })).query(async ({ input, ctx }) => {
+  entity: publicProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1) })).query(async ({ input, ctx }) => {
     const result = await getAnalysisResult(input.jobId);
-    if (!result || result.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "The requested entity is not available." });
+    if (!result || result.ownerId !== resolveAnalysisOwner(ctx)) throw new TRPCError({ code: "NOT_FOUND", message: "The requested entity is not available." });
     const entity = (result?.representation.entities as Array<{ id: string }> | undefined)?.find(item => item.id === input.entityId);
     if (!entity) throw new TRPCError({ code: "NOT_FOUND", message: "The requested entity is not available." });
     return entity;
   }),
-  hierarchy: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
+  hierarchy: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
     const result = await getAnalysisResult(input.jobId);
-    if (!result || result.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
+    if (!result || result.ownerId !== resolveAnalysisOwner(ctx)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current browser." });
     return {
       hierarchy: result.representation.hierarchy,
       pixelLevel: result.representation.pixelLevel,
@@ -141,26 +144,26 @@ export const imageAnalysisRouter = router({
       scaleLevels: result.representation.scaleLevels,
     };
   }),
-  relationships: protectedProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1).optional() })).query(async ({ input, ctx }) => {
+  relationships: publicProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1).optional() })).query(async ({ input, ctx }) => {
     const result = await getAnalysisResult(input.jobId);
-    if (!result || result.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
+    if (!result || result.ownerId !== resolveAnalysisOwner(ctx)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current browser." });
     const relationships = result.representation.relationships as Array<{ sourceId: string; targetId: string }>;
     return input.entityId ? relationships.filter(item => item.sourceId === input.entityId || item.targetId === input.entityId) : relationships;
   }),
   cacheTelemetry: adminProcedure.query(() => getAnalysisCacheTelemetry()),
-  artifacts: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
+  artifacts: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
     const result = await getAnalysisResult(input.jobId);
-    if (!result || result.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
+    if (!result || result.ownerId !== resolveAnalysisOwner(ctx)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current browser." });
     return result.artifactUrls;
   }),
-  cancel: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input, ctx }) => {
-    const job = await cancelAnalysisJob(input.jobId, String(ctx.user.id));
-    if (!job || job.ownerId !== String(ctx.user.id)) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis job is not available to the current user." });
+  cancel: publicProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input, ctx }) => {
+    const ownerId = resolveAnalysisOwner(ctx); const job = await cancelAnalysisJob(input.jobId, ownerId);
+    if (!job || job.ownerId !== ownerId) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis job is not available to the current browser." });
     return job;
   }),
-  discard: protectedProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input, ctx }) => {
-    const discarded = await discardAnalysisResult(input.jobId, String(ctx.user.id));
-    if (!discarded) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current user." });
+  discard: publicProcedure.input(z.object({ jobId: z.string().min(1) })).mutation(async ({ input, ctx }) => {
+    const discarded = await discardAnalysisResult(input.jobId, resolveAnalysisOwner(ctx));
+    if (!discarded) throw new TRPCError({ code: "NOT_FOUND", message: "This analysis result is not available to the current browser." });
     return { jobId: input.jobId, discarded: true };
   }),
 });
