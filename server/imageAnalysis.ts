@@ -687,7 +687,7 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
 export async function getAnalysisJob(jobId: string) {
   const active = activeJobs.get(jobId);
   const manifest = await ensureManifestAccess(jobId);
-  if (!manifest) return active ?? null;
+  if (!manifest) return null;
   if (active && active.ownerId === manifest.ownerId) return active;
   const terminal = manifest.status === "completed" || manifest.status === "failed" || manifest.status === "cancelled";
   return { jobId, ownerId: manifest.ownerId, status: manifest.status as AnalysisJobStatus["status"], stage: manifest.status, percent: manifest.status === "completed" ? 100 : 0, message: terminal ? manifest.status === "completed" ? "Analysis result remains available." : manifest.status === "cancelled" ? "Analysis was cancelled." : "Analysis did not complete." : "Analysis state is being restored.", createdAt: manifest.createdAt.getTime(), updatedAt: manifest.updatedAt.getTime(), completedAt: manifest.completedAt?.getTime() ?? null, expiresAt: manifest.expiresAt.getTime(), error: manifest.error ?? null, resultAvailable: manifest.status === "completed" };
@@ -713,3 +713,12 @@ export async function discardAnalysisResult(jobId: string, ownerId: string) {
 export function getAnalysisCacheTelemetry() {
   return activeResults.telemetry();
 }
+
+export const __testOnly = {
+  seedActiveJob(jobId: string, ownerId: string, now = Date.now()) {
+    return activeJobs.create(jobId, ownerId, now);
+  },
+  clearActiveJob(jobId: string) {
+    activeJobs.remove(jobId);
+  },
+};
