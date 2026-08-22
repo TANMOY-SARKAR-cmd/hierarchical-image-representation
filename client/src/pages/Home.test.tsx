@@ -186,6 +186,20 @@ describe("Hierarchy workbench UI", () => {
     }
   });
 
+  it("freezes the visible elapsed time when a terminal analysis state is received", () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      const view = render(<AnalysisProgressPanel job={{ jobId: "job-1", status: "failed", stage: "failed", percent: 1, message: "Analysis did not complete.", createdAt: now - 12_000, updatedAt: now - 5_000, completedAt: now - 5_000, expiresAt: now + 1_800_000, error: "The analysis engine stopped reporting progress during engine startup and was safely stopped.", resultAvailable: false }} />);
+      expect(view.getByText(/7s elapsed/i)).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(120_000));
+      expect(view.getByText(/7s elapsed/i)).toBeInTheDocument();
+      expect(view.queryByText(/127s elapsed/i)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("explains access-only retention and sends the current result to the discard endpoint", async () => {
     startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
     discardMutation.mutateAsync.mockResolvedValue({ jobId: "job-1", discarded: true });

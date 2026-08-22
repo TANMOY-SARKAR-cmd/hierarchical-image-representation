@@ -71,6 +71,9 @@ describe("Node-to-Python image analysis integration", () => {
     expect(pngArtifacts).toHaveLength(28);
     expect(pngArtifacts.every(item => item.data.subarray(1, 4).toString("ascii") === "PNG")).toBe(true);
     expect(svgArtifact?.data.toString("utf8").trimStart()).toMatch(/^<svg/);
+    expect(progressStages).toContain("initializing_engine");
+    expect(progressStages.indexOf("initializing_engine")).toBeLessThan(progressStages.indexOf("feature_extraction"));
+    expect(progressStages).toContain("validating_input");
     expect(progressStages.at(-1)).toBe("finalizing");
     expect(saveAnalysisManifestMock).toHaveBeenCalledTimes(1);
   }, 120_000);

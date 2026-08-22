@@ -161,7 +161,8 @@ export function AnalysisProgressPanel({ job }: { job: AnalysisJobStatus | null |
     return () => window.clearInterval(timer);
   }, [job?.jobId, terminal]);
   if (!job) return null;
-  const elapsedSeconds = Math.max(0, Math.floor((now - job.createdAt) / 1000));
+  const elapsedEnd = terminal ? (job.completedAt ?? job.updatedAt) : now;
+  const elapsedSeconds = Math.max(0, Math.floor((elapsedEnd - job.createdAt) / 1000));
   const advancedEta = terminal ? null : job.timing?.advancedEta;
   const etaVisual = advancedEta ? etaVisualRange(Math.max(0, now - job.createdAt), advancedEta) : null;
   return <section className={cn("rounded-xl border p-4", job.status === "failed" ? "border-rose-300/30 bg-rose-300/[0.04]" : "border-cyan-300/25 bg-cyan-300/[0.045]")} aria-live="polite">

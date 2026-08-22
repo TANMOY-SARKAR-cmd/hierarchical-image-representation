@@ -31,6 +31,8 @@ Result issuance always passes through the manifest access guard. On expiry or de
 
 During global energy-tree construction, the Python worker emits rate-limited `merge_tree` heartbeats while evaluating relationships and scoring candidate merges. The bridge treats those normalized public-safe stage events as liveness activity, while the original finite child-process budget remains authoritative. A genuinely silent child is still stopped by the bounded watchdog, and its terminal failure names the last safe stage rather than incorrectly implying that active deterministic hierarchy work has stalled.
 
+Before importing the heavy engine modules, the CLI emits a flushed `initializing_engine` heartbeat. The bridge grants this bootstrap state a separately bounded cold-start grace window that cannot exceed the active total process budget; after the first ordinary engine-stage event, the normal no-progress watchdog applies again. Terminal workbench states display elapsed duration through their persisted terminal timestamp rather than continuing to count after completion, failure, cancellation, or expiry.
+
 The active Python path combines versioned configuration, dense CIELAB feature extraction, continuous gradient boundary evidence, 4-neighbour canonical geometry, child sufficient-statistics aggregation, deterministic segmentation, sparse graph construction, a global energy-scored merge tree, deterministic cut derivation, separate cross-scale best-match and overlap evidence, entity-local adaptive reconstruction, measured sparse residual selection, sensitivity evidence, and orchestration. Historical entry points are compatibility shims or archived reference code rather than alternative active engines.
 
 | Component | Responsibility | Key v0.7 guarantee |

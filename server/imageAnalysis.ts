@@ -149,6 +149,7 @@ const DEFAULT_SUBMISSION_WINDOW_MS = 60 * 1000;
 const DEFAULT_SUBMISSION_MAX_PER_WINDOW = 3;
 const DEFAULT_MAX_INFLIGHT_ANALYSES = 2;
 const DEFAULT_PROGRESS_TIMEOUT_MS = 45 * 1000;
+const DEFAULT_ENGINE_STARTUP_TIMEOUT_MS = 90 * 1000;
 const DEFAULT_PROCESS_TIMEOUT_MS = 120 * 1000;
 const DEFAULT_SENSITIVITY_VARIANT_TIMEOUT_MS = 60 * 1000;
 const DEFAULT_MAX_ADVANCED_PROCESS_TIMEOUT_MS = 7 * 60 * 1000;
@@ -182,6 +183,7 @@ function processingLimitMessage(config: AnalysisConfig) {
 
 const stageLabels: Record<string, string> = {
   queued: "Queued",
+  initializing_engine: "Engine startup",
   validating_input: "Input validation",
   feature_extraction: "Feature extraction",
   segmentation: "Segmentation",
@@ -511,6 +513,9 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
     let stderr = "";
     let lastProgressStage = "initialization";
     const progressTimeoutMs = positiveInteger(process.env.ANALYSIS_PROGRESS_TIMEOUT_MS, DEFAULT_PROGRESS_TIMEOUT_MS);
+    const processTimeoutMs = processTimeoutFor(config);
+    const startupTimeoutMs = Math.min(processTimeoutMs, positiveInteger(process.env.ANALYSIS_ENGINE_STARTUP_TIMEOUT_MS, DEFAULT_ENGINE_STARTUP_TIMEOUT_MS));
+    let awaitingEngineReady = true;
     let livenessTimeout: ReturnType<typeof setTimeout> | null = null;
     const clearLivenessTimeout = () => {
       if (livenessTimeout) clearTimeout(livenessTimeout);
@@ -520,12 +525,12 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
       clearLivenessTimeout();
       livenessTimeout = setTimeout(() => {
         const stage = stageLabel(lastProgressStage).toLowerCase();
-        console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} did not report progress during ${stage} within ${progressTimeoutMs} ms.`);
+        const livenessWindowMs = awaitingEngineReady ? startupTimeoutMs : progressTimeoutMs;
+        console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} did not report progress during ${stage} within ${livenessWindowMs} ms.`);
         processHandle.kill("SIGKILL");
         reject(new AnalysisEngineError(`The analysis engine stopped reporting progress during ${stage} and was safely stopped. You can retry the same analysis.`));
-      }, progressTimeoutMs);
+      }, awaitingEngineReady ? startupTimeoutMs : progressTimeoutMs);
     };
-    const processTimeoutMs = processTimeoutFor(config);
     const timeout = setTimeout(() => {
       console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} exceeded its ${config.runParameterSensitivity ? "advanced" : "standard"} processing budget after ${processTimeoutMs} ms.`);
       processHandle.kill("SIGKILL");
@@ -544,6 +549,7 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
           const event = JSON.parse(line) as { event?: string; stage?: string; percent?: number; message?: string };
           if (event.event === "progress" && typeof event.stage === "string" && typeof event.percent === "number" && typeof event.message === "string") {
             lastProgressStage = event.stage;
+            if (event.stage !== "initializing_engine") awaitingEngineReady = false;
             armLivenessTimeout();
             console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} progressed to ${event.stage} (${event.percent}%).`);
             onProgress?.({ status: "running", stage: event.stage, percent: event.percent, message: event.message });
