@@ -509,6 +509,7 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
     let stdout = "";
     let stdoutBuffer = "";
     let stderr = "";
+    let lastProgressStage = "initialization";
     const progressTimeoutMs = positiveInteger(process.env.ANALYSIS_PROGRESS_TIMEOUT_MS, DEFAULT_PROGRESS_TIMEOUT_MS);
     let livenessTimeout: ReturnType<typeof setTimeout> | null = null;
     const clearLivenessTimeout = () => {
@@ -518,9 +519,10 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
     const armLivenessTimeout = () => {
       clearLivenessTimeout();
       livenessTimeout = setTimeout(() => {
-        console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} did not report progress within ${progressTimeoutMs} ms.`);
+        const stage = stageLabel(lastProgressStage).toLowerCase();
+        console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} did not report progress during ${stage} within ${progressTimeoutMs} ms.`);
         processHandle.kill("SIGKILL");
-        reject(new AnalysisEngineError("The analysis engine did not report progress in time. Please retry with a smaller image or less detail."));
+        reject(new AnalysisEngineError(`The analysis engine stopped reporting progress during ${stage} and was safely stopped. You can retry the same analysis.`));
       }, progressTimeoutMs);
     };
     const processTimeoutMs = processTimeoutFor(config);
@@ -541,6 +543,7 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
         try {
           const event = JSON.parse(line) as { event?: string; stage?: string; percent?: number; message?: string };
           if (event.event === "progress" && typeof event.stage === "string" && typeof event.percent === "number" && typeof event.message === "string") {
+            lastProgressStage = event.stage;
             armLivenessTimeout();
             console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} progressed to ${event.stage} (${event.percent}%).`);
             onProgress?.({ status: "running", stage: event.stage, percent: event.percent, message: event.message });

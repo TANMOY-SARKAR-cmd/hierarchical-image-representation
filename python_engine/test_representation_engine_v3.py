@@ -247,11 +247,25 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
             entity_id = f"part-{index}"
             masks[entity_id] = mask
             children.append(make_entity(entity_id, "micro_region", 1, 1, mask, image, fields))
-        nodes, roots, evidence = build_global_merge_tree(children, masks, image, fields, config)
+        heartbeats = []
+        nodes, roots, evidence = build_global_merge_tree(
+            children,
+            masks,
+            image,
+            fields,
+            config,
+            heartbeat=lambda iteration, active_count, message: heartbeats.append((iteration, active_count, message)),
+            heartbeat_interval_seconds=0.0,
+        )
         self.assertEqual(len(roots), 1)
         self.assertEqual(roots[0]["treeLeafCount"], 3)
         self.assertEqual(len(nodes), 2)
         self.assertEqual(sum(item.get("accepted", False) for item in evidence), 2)
+        self.assertGreaterEqual(len(heartbeats), 3)
+        self.assertTrue(any("Evaluating deterministic merge candidates" in message for _, _, message in heartbeats))
+        self.assertTrue(any("Scoring merge energy" in message for _, _, message in heartbeats))
+        self.assertTrue(any("Accepted a deterministic energy merge" in message for _, _, message in heartbeats))
+        self.assertTrue(all(active_count > 0 for _, active_count, _ in heartbeats))
 
     def test_tiny_residual_budget_omits_an_unrepresentable_sparse_payload(self):
         with tempfile.TemporaryDirectory() as directory:

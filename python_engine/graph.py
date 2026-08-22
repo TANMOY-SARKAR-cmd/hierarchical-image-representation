@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from typing import Any, Dict, Iterable, List, Mapping, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -115,13 +115,18 @@ def relationship_for(source: Dict[str, Any], target: Dict[str, Any], source_mask
     }
 
 
-def build_relationships(entities: List[Dict[str, Any]], masks: Dict[str, np.ndarray], adjacency: Set[Tuple[str, str]], image_shape: Tuple[int, int], config: Dict[str, Any], shared_boundaries: Mapping[Tuple[str, str], int] | None = None) -> List[Dict[str, Any]]:
+def build_relationships(entities: List[Dict[str, Any]], masks: Dict[str, np.ndarray], adjacency: Set[Tuple[str, str]], image_shape: Tuple[int, int], config: Dict[str, Any], shared_boundaries: Mapping[Tuple[str, str], int] | None = None, heartbeat: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
     links = candidate_pairs(entities, adjacency, int(config["graphK"]))
     relationships: List[Dict[str, Any]] = []
-    for source_index, target_index in sorted(links):
+    total = len(links)
+    if heartbeat is not None:
+        heartbeat(0, total)
+    for index, (source_index, target_index) in enumerate(sorted(links), start=1):
         source, target = entities[source_index], entities[target_index]
         key = tuple(sorted((source["id"], target["id"])))
         relationships.append(relationship_for(source, target, masks[source["id"]], masks[target["id"]], image_shape, links[(source_index, target_index)], int((shared_boundaries or {}).get(key, 0)), config))
+        if heartbeat is not None and (index == total or index % 8 == 0):
+            heartbeat(index, total)
     return relationships
 
 

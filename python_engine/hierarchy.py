@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+import time
 
 import cv2
 import numpy as np
@@ -69,7 +71,7 @@ def merge_energy(source: Dict[str, Any], target: Dict[str, Any], union: Dict[str
     }
 
 
-def build_global_merge_tree(leaves: List[Dict[str, Any]], masks: Dict[str, np.ndarray], rgb: np.ndarray, fields: Dict[str, np.ndarray], config: Dict[str, Any], initial_adjacency: Optional[set[Tuple[str, str]]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+def build_global_merge_tree(leaves: List[Dict[str, Any]], masks: Dict[str, np.ndarray], rgb: np.ndarray, fields: Dict[str, np.ndarray], config: Dict[str, Any], initial_adjacency: Optional[set[Tuple[str, str]]] = None, heartbeat: Optional[Callable[[int, int, str], None]] = None, heartbeat_interval_seconds: float = 2.0) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Create persistent merge nodes until no valid candidate improves the local objective."""
     active: Dict[str, Dict[str, Any]] = {leaf["id"]: leaf for leaf in leaves}
     nodes: List[Dict[str, Any]] = []
@@ -84,16 +86,39 @@ def build_global_merge_tree(leaves: List[Dict[str, Any]], masks: Dict[str, np.nd
     threshold = float(config["mergeEnergyThreshold"])
     max_iterations = int(config["maxAgglomerationIterations"])
     iteration = 0
+    last_heartbeat_at = 0.0
+
+    def report_heartbeat(message: str, force: bool = False) -> None:
+        nonlocal last_heartbeat_at
+        now = time.monotonic()
+        if heartbeat is None or (not force and now - last_heartbeat_at < heartbeat_interval_seconds):
+            return
+        last_heartbeat_at = now
+        heartbeat(iteration, len(active), message)
+
     while len(active) > 1 and iteration < max_iterations:
+        report_heartbeat("Evaluating deterministic merge candidates.", force=True)
         entities = [active[key] for key in sorted(active)]
         active_masks = {key: masks[key] for key in active}
         adjacency = (
             {tuple(sorted((source_id, target_id))) for source_id, targets in neighbours.items() if source_id in active for target_id in targets if target_id in active and source_id != target_id}
             if neighbours is not None else adjacency_from_masks(entities, active_masks)
         )
-        relationships = build_relationships(entities, active_masks, adjacency, rgb.shape[:2], config)
+        relationships = build_relationships(
+            entities,
+            active_masks,
+            adjacency,
+            rgb.shape[:2],
+            config,
+            heartbeat=lambda processed, total: report_heartbeat(
+                f"Evaluating merge relationships ({processed} of {total} candidates)."
+            ),
+        )
         candidates: List[Tuple[float, str, str, np.ndarray, Dict[str, Any], Dict[str, float]]] = []
-        for relationship in relationships:
+        relationship_total = len(relationships)
+        for relationship_index, relationship in enumerate(relationships, start=1):
+            if relationship_index == 1 or relationship_index % 8 == 0 or relationship_index == relationship_total:
+                report_heartbeat(f"Scoring merge energy ({relationship_index} of {relationship_total} relationships).")
             source_id, target_id = relationship["sourceId"], relationship["targetId"]
             if not relationship["adjacent"]:
                 continue
@@ -130,6 +155,7 @@ def build_global_merge_tree(leaves: List[Dict[str, Any]], masks: Dict[str, np.nd
         node["treeLeafCount"] = int(source.get("treeLeafCount", 1) + target.get("treeLeafCount", 1))
         source["parentId"] = node_id; target["parentId"] = node_id
         masks[node_id] = merged_mask; active[node_id] = node; nodes.append(node); evidence.append(event); iteration += 1
+        report_heartbeat("Accepted a deterministic energy merge.")
         if neighbours is not None:
             merged_neighbours = (neighbours.pop(source_id, set()) | neighbours.pop(target_id, set())) - {source_id, target_id}
             neighbours[node_id] = set()

@@ -170,3 +170,7 @@
 - [x] Validate, document, checkpoint, synchronize, and deliver the rendering recovery, deferred-inspector, and timing-history export release.
 - [x] Diagnose the public entry-module bootstrap stall and add explicit ready/failure state reporting without exposing private analysis data.
 - [x] Add startup-recovery regressions and prove the current production build mounts past the visible loading fallback on the public domain.
+- [ ] Add bounded merge-tree progress heartbeats without changing deterministic hierarchy or reconstruction fidelity.
+- [ ] Preserve true-stall and finite processing-budget protection with stage-aware liveness handling and clear safe failure messages.
+- [ ] Add engine, lifecycle, UI, local-smoke, and published-smoke regressions for long hierarchy work and silent-engine failures.
+- [ ] Validate, document, checkpoint, synchronize, and deliver the full-fidelity analysis-liveness repair.

@@ -177,7 +177,14 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any], prog
     report("cross_scale", 50, "Recorded cross-scale correspondence and overlap evidence.")
 
     hierarchy_started = time.perf_counter()
-    merge_nodes, tree_roots, merge_evidence = build_global_merge_tree(micro_regions, masks, rgb, base_fields, config, base_adjacency)
+    merge_count = max(1, len(micro_regions) - 1)
+
+    def hierarchy_heartbeat(iteration: int, active_count: int, message: str) -> None:
+        bounded_percent = min(63, 51 + int(12 * min(max(iteration, 0), merge_count) / merge_count))
+        report("merge_tree", bounded_percent, f"{message} Iteration {iteration}; {active_count} active regions.")
+
+    report("merge_tree", 51, "Starting deterministic global energy merge-tree construction.")
+    merge_nodes, tree_roots, merge_evidence = build_global_merge_tree(micro_regions, masks, rgb, base_fields, config, base_adjacency, heartbeat=hierarchy_heartbeat)
     tree_lookup = {item["id"]: item for item in [*micro_regions, *merge_nodes]}
     fractions = config["derivedCutTargetFractions"]
     cut_targets = {name: max(len(tree_roots), int(round(len(micro_regions) * float(fraction)))) for name, fraction in fractions.items()}

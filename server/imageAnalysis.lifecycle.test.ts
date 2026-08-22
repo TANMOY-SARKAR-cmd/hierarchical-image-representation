@@ -74,6 +74,22 @@ describe("durable analysis lifecycle guard", () => {
     expect(active?.timing?.advancedEta).toBeNull();
   });
 
+  it("coalesces bounded public-safe merge-tree heartbeats while a full-fidelity hierarchy is active", () => {
+    const store = new AnalysisJobStore(60_000);
+    store.create("timed-merge-tree", ownerId, 1_000, { runParameterSensitivity: false, sensitivityVariantLimit: 0 });
+    store.update("timed-merge-tree", { status: "running", stage: "cross_scale", percent: 50, message: "Recorded cross-scale correspondence and overlap evidence." }, 2_000);
+    store.update("timed-merge-tree", { status: "running", stage: "merge_tree", percent: 51, message: "Starting deterministic global energy merge-tree construction." }, 3_000);
+    const active = store.update("timed-merge-tree", { status: "running", stage: "merge_tree", percent: 58, message: "Scoring merge energy (32 of 128 relationships). Iteration 14; 58 active regions." }, 11_000);
+
+    expect(active?.percent).toBe(58);
+    expect(active?.timing?.stages.map(stage => stage.stage)).toEqual(["queued", "cross_scale", "merge_tree"]);
+    expect(active?.timing?.stages.at(-1)).toMatchObject({ stage: "merge_tree", durationMs: 8_000 });
+    expect(active?.timing?.stages.at(-1)?.messages).toEqual([
+      { message: "Starting deterministic global energy merge-tree construction.", at: 3_000, offsetMs: 0 },
+      { message: "Scoring merge energy (32 of 128 relationships). Iteration 14; 58 active regions.", at: 11_000, offsetMs: 8_000 },
+    ]);
+  });
+
   it("restores the owner-scoped durable timing snapshot when no local job remains", async () => {
     const restored = { jobId: "restored-timing", ownerId, status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: 1_000, updatedAt: 9_000, completedAt: 9_000, expiresAt: Date.now() + 60_000, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 8_000, stages: [{ stage: "feature_extraction", label: "Feature extraction", startedAt: 1_000, endedAt: 9_000, durationMs: 8_000 }], advancedEta: null } };
     getAnalysisManifestMock.mockResolvedValue({ jobId: "restored-timing", ownerId, status: "completed", expiresAt: new Date(Date.now() + 60_000), completedAt: new Date(9_000), error: null, progressSnapshot: JSON.stringify(restored) });

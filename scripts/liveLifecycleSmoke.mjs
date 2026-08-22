@@ -101,7 +101,7 @@ const request = {
 
 const client = createAnonymousClient();
 const isolatedClient = createAnonymousClient();
-const summary = { mode: runSensitivity ? "five_variant_sensitivity" : "primary", terminal: "", elapsedMs: 0, observedStatuses: [], observedStages: [], advancedEtaObserved: false, verification: [], failedAt: "startup" };
+const summary = { mode: runSensitivity ? "five_variant_sensitivity" : "primary", terminal: "", elapsedMs: 0, observedStatuses: [], observedStages: [], advancedEtaObserved: false, mergeTreeHeartbeatObserved: false, verification: [], failedAt: "startup" };
 
 try {
   summary.failedAt = "start";
@@ -116,6 +116,12 @@ try {
   if (terminal.job.status !== "completed" || !terminal.job.resultAvailable) {
     throw new Error("The live job did not produce an available completed result.");
   }
+  const mergeTreeStage = terminal.job.timing?.stages?.find(stage => stage.stage === "merge_tree");
+  if (!mergeTreeStage || (mergeTreeStage.messages?.length ?? 0) < 2) {
+    throw new Error("The completed analysis did not retain bounded merge-tree progress detail.");
+  }
+  summary.mergeTreeHeartbeatObserved = true;
+  summary.verification.push("merge-tree progress detail");
 
   summary.failedAt = "cross-browser isolation";
   await expectDenied("Cross-browser status", () => isolatedClient.imageAnalysis.status.query({ jobId: started.jobId }));
