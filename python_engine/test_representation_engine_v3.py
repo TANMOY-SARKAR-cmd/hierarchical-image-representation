@@ -15,7 +15,7 @@ from hierarchy import build_global_merge_tree, graph_group_level
 from reconstruction import write_calibrated_error_heatmap
 from reconstruction_models import fit_appearance_model
 from schema import SCHEMA_VERSION, read_compatible_representation
-from segmentation import segment_image
+from segmentation import segment_image, segment_image_with_diagnostics
 
 
 class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
@@ -134,6 +134,25 @@ class GraphDrivenRelationalEntityEngineTest(unittest.TestCase):
                 self.assertEqual(payload["configuration"]["segmentationStrategy"], strategy)
                 self.assertEqual(set(payload["segmentationDiagnostics"]), {"slic", "watershed", "felzenszwalb"})
                 self.assertGreater(payload["segmentationDiagnostics"][strategy]["entityCount"], 0)
+
+    def test_low_coherence_slic_never_silently_serializes_a_single_region(self):
+        rng = np.random.default_rng(17)
+        image = rng.integers(0, 256, size=(96, 128, 3), dtype=np.uint8)
+        first, first_diagnostic = segment_image_with_diagnostics(image, "slic", 48, 10, 2, 160)
+        second, second_diagnostic = segment_image_with_diagnostics(image, "slic", 48, 10, 2, 160)
+        self.assertTrue(first_diagnostic["degenerate"] or first_diagnostic["actualSegments"] > 1)
+        self.assertGreater(first_diagnostic["actualSegments"], 1)
+        self.assertIn(first_diagnostic["fallbackAction"], {"none", "slic_without_connectivity_retry", "deterministic_grid_fallback"})
+        self.assertTrue(np.array_equal(first, second))
+        self.assertEqual(first_diagnostic, second_diagnostic)
+
+    def test_high_cardinality_felzenszwalb_is_deterministically_reduced_before_hierarchy(self):
+        rng = np.random.default_rng(23)
+        image = rng.integers(0, 256, size=(120, 120, 3), dtype=np.uint8)
+        labels, diagnostic = segment_image_with_diagnostics(image, "felzenszwalb", 72, 10, 2, 64)
+        self.assertLessEqual(int(labels.max()), 64)
+        self.assertLessEqual(diagnostic["actualSegments"], 64)
+        self.assertEqual(diagnostic["fallbackAction"], "deterministic_grid_reduction")
 
     def test_directional_relationship_fields_are_antisymmetric_while_distance_is_symmetric(self):
         image = np.zeros((8, 12, 3), dtype=np.uint8)

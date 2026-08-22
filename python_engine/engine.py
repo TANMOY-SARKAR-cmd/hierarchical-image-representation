@@ -21,7 +21,7 @@ from reconstruction_models import fit_entity_models, reconstruct_adaptive
 from residuals import bounded_residual
 from rd_optimizer import rate_distortion
 from schema import SCHEMA_VERSION, config_hash, resolved_config
-from segmentation import label_adjacency, segment_image, shared_boundary_lengths
+from segmentation import label_adjacency, segment_image, segment_image_with_diagnostics, shared_boundary_lengths
 from sensitivity import run_parameter_sensitivity
 
 
@@ -38,18 +38,18 @@ def resize_image(rgb: np.ndarray, factor: int) -> np.ndarray:
     return cv2.resize(rgb, (max(2, width // factor), max(2, height // factor)), interpolation=cv2.INTER_AREA)
 
 
-def build_scale(rgb: np.ndarray, factor: int, config: Dict[str, Any]) -> Tuple[np.ndarray, Dict[str, np.ndarray], np.ndarray, List[Dict[str, Any]], Dict[str, np.ndarray], Dict[str, int]]:
+def build_scale(rgb: np.ndarray, factor: int, config: Dict[str, Any]) -> Tuple[np.ndarray, Dict[str, np.ndarray], np.ndarray, List[Dict[str, Any]], Dict[str, np.ndarray], Dict[str, int], Dict[str, Any]]:
     scaled_rgb = resize_image(rgb, factor)
     tensor, fields = extract_features(scaled_rgb, config)
     requested = max(8, int(config["slicSegments"] / (factor * factor)))
-    labels = segment_image(scaled_rgb, config.get("segmentationStrategy", config["groupingMethod"]), requested, config["slicCompactness"], config["minimumRegionPixels"])
+    labels, diagnostic = segment_image_with_diagnostics(scaled_rgb, config.get("segmentationStrategy", config["groupingMethod"]), requested, config["slicCompactness"], config["minimumRegionPixels"], config["maxInitialSegments"])
     entities: List[Dict[str, Any]] = []; masks: Dict[str, np.ndarray] = {}; label_by_id: Dict[str, int] = {}
     for label in range(1, int(labels.max()) + 1):
         entity_id = f"resolution-{factor}-micro-region-{label}"
         mask = labels == label
         entities.append(make_entity(entity_id, "micro_region", 1, factor, mask, scaled_rgb, fields, lineage={"operation": "segment", "parents": []}))
         masks[entity_id] = mask; label_by_id[entity_id] = label
-    return tensor, fields, labels, entities, masks, label_by_id
+    return tensor, fields, labels, entities, masks, label_by_id, diagnostic
 
 
 def graph_edges_for_labels(label_by_id: Dict[str, int], labels: np.ndarray) -> Tuple[set[Tuple[str, str]], Dict[Tuple[str, str], int]]:
@@ -131,27 +131,27 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any], prog
     for key, output_name, colormap in (("lightness", "brightness", cv2.COLORMAP_VIRIDIS), ("edge_strength", "edge-strength", cv2.COLORMAP_INFERNO), ("gradient_x", "gradient-x", cv2.COLORMAP_COOL), ("gradient_y", "gradient-y", cv2.COLORMAP_COOL), ("complexity", "complexity", cv2.COLORMAP_TURBO)):
         write_overlay(base_fields[key], overlays_dir / f"{output_name}.png", colormap)
 
-    segmentation_started = time.perf_counter(); scale_data: Dict[int, Tuple[np.ndarray, Dict[str, np.ndarray], np.ndarray, List[Dict[str, Any]], Dict[str, np.ndarray], Dict[str, int]]] = {}
+    segmentation_started = time.perf_counter(); scale_data: Dict[int, Tuple[np.ndarray, Dict[str, np.ndarray], np.ndarray, List[Dict[str, Any]], Dict[str, np.ndarray], Dict[str, int], Dict[str, Any]]] = {}
     segmentation_diagnostics: Dict[str, Dict[str, Any]] = {}
     requested_native = max(8, int(config["slicSegments"]))
     candidate_strategies = [config.get("segmentationStrategy", "slic")]
     if config.get("compareSegmentationBaselines", False):
         candidate_strategies = ["slic", "watershed", "felzenszwalb"]
     for strategy in dict.fromkeys(candidate_strategies):
-        diagnostic_labels = segment_image(rgb, str(strategy), requested_native, config["slicCompactness"], config["minimumRegionPixels"])
+        diagnostic_labels, diagnostic = segment_image_with_diagnostics(rgb, str(strategy), requested_native, config["slicCompactness"], config["minimumRegionPixels"], config["maxInitialSegments"])
         horizontal = diagnostic_labels[:, 1:] != diagnostic_labels[:, :-1]; vertical = diagnostic_labels[1:, :] != diagnostic_labels[:-1, :]
         edge = base_fields["edge_strength"]
         boundary_values = np.concatenate((edge[:, 1:][horizontal], edge[1:, :][vertical]))
-        segmentation_diagnostics[str(strategy)] = {"strategy": str(strategy), "entityCount": int(diagnostic_labels.max()), "meanBoundaryEdgeStrength": rounded(float(boundary_values.mean()) if boundary_values.size else 0.0, 8), "requestedSegments": requested_native}
+        segmentation_diagnostics[str(strategy)] = {**diagnostic, "entityCount": int(diagnostic_labels.max()), "meanBoundaryEdgeStrength": rounded(float(boundary_values.mean()) if boundary_values.size else 0.0, 8)}
     scales: List[Dict[str, Any]] = []
     for factor in config["scaleLevels"]:
         scale_data[factor] = build_scale(rgb, factor, config)
-        tensor, fields, labels, entities, masks, label_by_id = scale_data[factor]
+        tensor, fields, labels, entities, masks, label_by_id, diagnostic = scale_data[factor]
         reconstruction = reconstruct_entities(entities, masks, resize_image(rgb, factor).shape)
-        scales.append({"resolutionFactor": factor, "scaleFactor": factor, "resolutionName": {1: "native", 2: "half", 4: "quarter", 8: "eighth"}.get(factor, f"1/{factor}"), "width": int(labels.shape[1]), "height": int(labels.shape[0]), "featureShape": list(tensor.shape), "entityIds": [entity["id"] for entity in entities], "entityCount": len(entities), "segmentationCharacteristics": {"strategy": config.get("segmentationStrategy", "slic"), "requestedSegments": max(8, int(config["slicSegments"] / (factor * factor))), "actualSegments": int(labels.max()), "meanComplexity": rounded(fields["complexity"].mean(), 8)}, "reconstructionError": metrics_for(resize_image(rgb, factor), reconstruction), "crossScaleLinks": []})
+        scales.append({"resolutionFactor": factor, "scaleFactor": factor, "resolutionName": {1: "native", 2: "half", 4: "quarter", 8: "eighth"}.get(factor, f"1/{factor}"), "width": int(labels.shape[1]), "height": int(labels.shape[0]), "featureShape": list(tensor.shape), "entityIds": [entity["id"] for entity in entities], "entityCount": len(entities), "segmentationCharacteristics": {**diagnostic, "meanComplexity": rounded(fields["complexity"].mean(), 8)}, "reconstructionError": metrics_for(resize_image(rgb, factor), reconstruction), "crossScaleLinks": []})
     profile["segmentationMs"] = rounded((time.perf_counter() - segmentation_started) * 1000, 3)
     report("segmentation", 38, "Built deterministic micro-regions across the requested image scales.")
-    _, _, base_labels, micro_regions, masks, label_by_id = scale_data[1]
+    _, _, base_labels, micro_regions, masks, label_by_id, _ = scale_data[1]
     base_adjacency, shared_boundaries = graph_edges_for_labels(label_by_id, base_labels)
 
     scale_by_factor = {item["resolutionFactor"]: item for item in scales}; cross_scale: List[Dict[str, Any]] = []; cross_scale_overlaps: List[Dict[str, Any]] = []
@@ -168,7 +168,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any], prog
         for factor in config["scaleLevels"]:
             if factor == 1:
                 continue
-            _, _, _, coarse_entities, coarse_masks, _ = scale_data[factor]
+            _, _, _, coarse_entities, coarse_masks, _, _ = scale_data[factor]
             links = match_scales(micro_regions, masks, coarse_entities, coarse_masks, factor, (height, width))
             overlap_links = overlap_scales(micro_regions, masks, coarse_entities, coarse_masks, factor, (height, width), float(config["crossScaleOverlapThreshold"]))
             scale_by_factor[1]["crossScaleLinks"].extend(links); scale_by_factor[1].setdefault("crossScaleOverlapLinks", []).extend(overlap_links)
@@ -177,7 +177,7 @@ def analyze(input_path: Path, output_dir: Path, raw_config: Dict[str, Any], prog
     report("cross_scale", 50, "Recorded cross-scale correspondence and overlap evidence.")
 
     hierarchy_started = time.perf_counter()
-    merge_nodes, tree_roots, merge_evidence = build_global_merge_tree(micro_regions, masks, rgb, base_fields, config)
+    merge_nodes, tree_roots, merge_evidence = build_global_merge_tree(micro_regions, masks, rgb, base_fields, config, base_adjacency)
     tree_lookup = {item["id"]: item for item in [*micro_regions, *merge_nodes]}
     fractions = config["derivedCutTargetFractions"]
     cut_targets = {name: max(len(tree_roots), int(round(len(micro_regions) * float(fraction)))) for name, fraction in fractions.items()}

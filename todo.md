@@ -134,3 +134,8 @@
 - [x] Add persisted owner-scoped analysis manifests, bounded artifact-reference lifecycle, preflight admission, cancellation, and accurate job failure states.
 - [x] Redesign the workbench with task-prioritized Essentials/Fidelity/Research controls, truthful run status, accessible hierarchy navigation, and compact mobile progressive disclosure.
 - [x] Add remediation regressions, update documentation, validate, checkpoint, synchronize, and deliver the audit-driven release.
+- [x] Add deterministic stress fixtures and regressions for low-coherence SLIC degeneration and high-cardinality Felzenszwalb inputs.
+- [x] Add bounded diagnostic segmentation fallback/reduction behavior and sparse merge-tree neighbour topology updates.
+- [x] Sanitize public engine errors and remove duplicate residual-energy artifact storage writes.
+- [x] Add browser drag/drop, pixel-dimension preflight, minimum-region control, accurate segmentation labels, and result diagnostics.
+- [x] Validate, document, checkpoint, synchronize, and deliver the completed stress-remediation release.

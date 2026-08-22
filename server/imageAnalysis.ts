@@ -32,6 +32,7 @@ export type AnalysisConfig = {
   slicSegments: number;
   slicCompactness: number;
   minimumRegionPixels: number;
+  maxInitialSegments?: number;
   runScaleConsistency: boolean;
   maxConsistencyPixels: number;
   crossScaleOverlapThreshold: number;
@@ -145,6 +146,13 @@ export class AnalysisCancelledError extends Error {
 
 export class AnalysisInputError extends Error {
   readonly code = "BAD_INPUT";
+}
+
+export class AnalysisEngineError extends Error {
+  readonly code = "ENGINE_FAILURE";
+  constructor(message = "The image analysis engine could not complete this input. Reduce segmentation detail or choose a smaller image and retry.") {
+    super(message);
+  }
 }
 
 export class AnalysisSubmissionAdmission {
@@ -394,7 +402,8 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
         return;
       }
       if (code !== 0) {
-        reject(new Error(`The Python analysis engine failed (${code}): ${stderr.slice(-1200)}`));
+        console.error(`[ImageAnalysis] Python engine failed with exit code ${code}: ${stderr.slice(-4000)}`);
+        reject(new AnalysisEngineError());
         return;
       }
       try {
@@ -500,13 +509,14 @@ export async function analyzeImage(input: {
       await runPython(inputPath, outputPath, input.config, run?.onProgress, run?.jobId);
       const representation = JSON.parse(await fs.readFile(path.join(outputPath, "representation.json"), "utf8")) as Record<string, unknown>;
     run?.onProgress?.({ status: "uploading", stage: "uploading_artifacts", percent: 97, message: "Uploading private analysis artifacts for the completed run." });
+    const residualEnergyUrl = await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png");
     const overlayUrls = {
       brightness: await uploadArtifact(jobId, outputPath, "overlays/brightness.png", "image/png"),
       edgeStrength: await uploadArtifact(jobId, outputPath, "overlays/edge-strength.png", "image/png"),
       gradientX: await uploadArtifact(jobId, outputPath, "overlays/gradient-x.png", "image/png"),
       gradientY: await uploadArtifact(jobId, outputPath, "overlays/gradient-y.png", "image/png"),
       complexity: await uploadArtifact(jobId, outputPath, "overlays/complexity.png", "image/png"),
-      residualEnergy: await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png"),
+      residualEnergy: residualEnergyUrl,
       relationshipGraph: await uploadArtifact(jobId, outputPath, "overlays/relationship-graph.png", "image/png"),
       normalizedDistanceGraph: await uploadArtifact(jobId, outputPath, "overlays/normalized-distance-graph.png", "image/png"),
     };
@@ -525,7 +535,7 @@ export async function analyzeImage(input: {
       absolutePixelError: await uploadArtifact(jobId, outputPath, "errors/absolute-error.png", "image/png"),
       parametricError: await uploadArtifact(jobId, outputPath, "errors/parametric-error.png", "image/png"),
       perRegionError: await uploadArtifact(jobId, outputPath, "errors/per-region-error.png", "image/png"),
-      residualEnergy: await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png"),
+      residualEnergy: residualEnergyUrl,
       byReconstruction,
     };
     const evidenceMetadata = (((representation.artifacts as { errors?: { evidenceByReconstruction?: Record<string, { artifact?: string; width?: number; height?: number }> } } | undefined)?.errors?.evidenceByReconstruction) ?? {});

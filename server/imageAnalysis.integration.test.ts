@@ -57,10 +57,10 @@ describe("Node-to-Python image analysis integration", () => {
     expect(uploadedRepresentation).toMatchObject({ representation_version: "0.7.0", hierarchy: { grouping: "global_energy_scored_4_neighbour_merge_tree_with_derived_cuts", treeNodeIds: expect.any(Array), cuts: { region: expect.any(Object), composite: expect.any(Object), entity: expect.any(Object) } }, reconstruction_metadata: { outputs: { parametric: expect.any(Object), residual: expect.any(Object) }, errorHeatmaps: { schema: "CalibratedAbsoluteRgbErrorHeatmap@0.7", referenceMeanAbsoluteRgbDelta: 32, byReconstruction: { constant: expect.any(Object), parametric: expect.any(Object), residual: expect.any(Object) } }, heuristicRateDistortion: { basis: "parameter_payload_estimate_not_serialized_storage" } }, artifactStorage: { basis: "actual_emitted_file_bytes" } });
     const residualEmitted = Boolean(uploadedRepresentation.reconstruction_metadata?.residual?.artifactEmitted);
     expect(result.artifactUrls.errors.byReconstruction).toMatchObject({ constant: expect.stringContaining("errors/by-reconstruction/constant.png"), parametric: expect.stringContaining("errors/by-reconstruction/parametric.png"), residual: expect.stringContaining("errors/by-reconstruction/residual.png") });
-    expect(uploadedArtifacts).toHaveLength(residualEmitted ? 41 : 40);
+    expect(uploadedArtifacts).toHaveLength(residualEmitted ? 40 : 39);
     expect(npzArtifacts).toHaveLength(residualEmitted ? 2 : 1);
     expect(npzArtifacts.every(item => item.data.subarray(0, 4).toString("latin1") === "PK\u0003\u0004")).toBe(true);
-    expect(pngArtifacts).toHaveLength(29);
+    expect(pngArtifacts).toHaveLength(28);
     expect(pngArtifacts.every(item => item.data.subarray(1, 4).toString("ascii") === "PNG")).toBe(true);
     expect(svgArtifact?.data.toString("utf8").trimStart()).toMatch(/^<svg/);
   }, 120_000);

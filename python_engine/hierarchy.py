@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -69,11 +69,17 @@ def merge_energy(source: Dict[str, Any], target: Dict[str, Any], union: Dict[str
     }
 
 
-def build_global_merge_tree(leaves: List[Dict[str, Any]], masks: Dict[str, np.ndarray], rgb: np.ndarray, fields: Dict[str, np.ndarray], config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+def build_global_merge_tree(leaves: List[Dict[str, Any]], masks: Dict[str, np.ndarray], rgb: np.ndarray, fields: Dict[str, np.ndarray], config: Dict[str, Any], initial_adjacency: Optional[set[Tuple[str, str]]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Create persistent merge nodes until no valid candidate improves the local objective."""
     active: Dict[str, Dict[str, Any]] = {leaf["id"]: leaf for leaf in leaves}
     nodes: List[Dict[str, Any]] = []
     evidence: List[Dict[str, Any]] = []
+    neighbours: Optional[Dict[str, set[str]]] = None
+    if initial_adjacency is not None:
+        neighbours = {entity_id: set() for entity_id in active}
+        for source_id, target_id in initial_adjacency:
+            if source_id in neighbours and target_id in neighbours:
+                neighbours[source_id].add(target_id); neighbours[target_id].add(source_id)
     max_area = rgb.shape[0] * rgb.shape[1] * float(config["maxEntityAreaFraction"])
     threshold = float(config["mergeEnergyThreshold"])
     max_iterations = int(config["maxAgglomerationIterations"])
@@ -81,7 +87,10 @@ def build_global_merge_tree(leaves: List[Dict[str, Any]], masks: Dict[str, np.nd
     while len(active) > 1 and iteration < max_iterations:
         entities = [active[key] for key in sorted(active)]
         active_masks = {key: masks[key] for key in active}
-        adjacency = adjacency_from_masks(entities, active_masks)
+        adjacency = (
+            {tuple(sorted((source_id, target_id))) for source_id, targets in neighbours.items() if source_id in active for target_id in targets if target_id in active and source_id != target_id}
+            if neighbours is not None else adjacency_from_masks(entities, active_masks)
+        )
         relationships = build_relationships(entities, active_masks, adjacency, rgb.shape[:2], config)
         candidates: List[Tuple[float, str, str, np.ndarray, Dict[str, Any], Dict[str, float]]] = []
         for relationship in relationships:
@@ -121,6 +130,14 @@ def build_global_merge_tree(leaves: List[Dict[str, Any]], masks: Dict[str, np.nd
         node["treeLeafCount"] = int(source.get("treeLeafCount", 1) + target.get("treeLeafCount", 1))
         source["parentId"] = node_id; target["parentId"] = node_id
         masks[node_id] = merged_mask; active[node_id] = node; nodes.append(node); evidence.append(event); iteration += 1
+        if neighbours is not None:
+            merged_neighbours = (neighbours.pop(source_id, set()) | neighbours.pop(target_id, set())) - {source_id, target_id}
+            neighbours[node_id] = set()
+            for neighbour_id in sorted(merged_neighbours):
+                if neighbour_id not in active:
+                    continue
+                neighbours[neighbour_id].discard(source_id); neighbours[neighbour_id].discard(target_id); neighbours[neighbour_id].add(node_id)
+                neighbours[node_id].add(neighbour_id)
     return nodes, [active[key] for key in sorted(active)], evidence
 
 

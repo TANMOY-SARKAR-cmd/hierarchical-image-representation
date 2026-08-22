@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { AnalysisAdmissionError, AnalysisCancelledError, AnalysisInputError, analyzeImage, cancelAnalysisJob, discardAnalysisResult, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, getLocalErrorSample, getThresholdedErrorHeatmap, startAnalysisJob } from "../imageAnalysis";
+import { AnalysisAdmissionError, AnalysisCancelledError, AnalysisEngineError, AnalysisInputError, analyzeImage, cancelAnalysisJob, discardAnalysisResult, getAnalysisCacheTelemetry, getAnalysisJob, getAnalysisResult, getLocalErrorSample, getThresholdedErrorHeatmap, startAnalysisJob } from "../imageAnalysis";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 
 const analysisConfig = z.object({
@@ -31,6 +31,7 @@ const analysisConfig = z.object({
   slicSegments: z.number().int().min(8).max(180).default(72),
   slicCompactness: z.number().min(0.1).max(50).default(10),
   minimumRegionPixels: z.number().int().min(1).max(500).default(12),
+  maxInitialSegments: z.number().int().min(16).max(500).default(320),
   runScaleConsistency: z.boolean().default(true),
   maxConsistencyPixels: z.number().int().min(64 * 64).max(1_500_000).default(786_432),
   crossScaleOverlapThreshold: z.number().min(0.01).max(1).default(0.20),
@@ -79,6 +80,7 @@ export const imageAnalysisRouter = router({
         if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
         if (error instanceof AnalysisInputError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
         if (error instanceof AnalysisCancelledError) throw new TRPCError({ code: "CONFLICT", message: error.message });
+        if (error instanceof AnalysisEngineError) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: error.message });
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: error instanceof Error ? error.message : "Image analysis could not be completed.",
@@ -91,6 +93,7 @@ export const imageAnalysisRouter = router({
     } catch (error) {
       if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
       if (error instanceof AnalysisInputError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+      if (error instanceof AnalysisEngineError) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: error.message });
       throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Image analysis could not be started." });
     }
   }),

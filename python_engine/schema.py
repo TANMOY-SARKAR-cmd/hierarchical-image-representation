@@ -23,6 +23,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "slicSegments": 72,
     "slicCompactness": 10.0,
     "minimumRegionPixels": 12,
+    "maxInitialSegments": 320,
     "graphK": 3,
     "featureWeights": {"gradient": 0.35, "variance": 0.20, "edge": 0.25, "texture": 0.20},
     "groupingWeights": {"space": 0.16, "color": 0.25, "brightness": 0.12, "texture": 0.13, "gradient": 0.12, "shape": 0.12, "boundary": 0.10},

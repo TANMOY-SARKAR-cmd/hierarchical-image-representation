@@ -70,7 +70,7 @@ describe("imageAnalysis router", () => {
     const caller = imageAnalysisRouter.createCaller(userContext);
     const response = await caller.process(baseInput);
 
-    expect(analyzeImage).toHaveBeenCalledWith(baseInput, "1", expect.any(String));
+    expect(analyzeImage).toHaveBeenCalledWith(expect.objectContaining({ ...baseInput, config: expect.objectContaining(baseInput.config) }), "1", "user:1");
     expect(response.jobId).toBe("job-123");
   });
 
@@ -90,7 +90,7 @@ describe("imageAnalysis router", () => {
     await expect(owner.start(baseInput)).resolves.toEqual(queued);
     await expect(owner.status({ jobId: "job-progress" })).resolves.toEqual(queued);
     await expect(otherUser.status({ jobId: "job-progress" })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(startAnalysisJob).toHaveBeenCalledWith(baseInput, "1", expect.any(String));
+    expect(startAnalysisJob).toHaveBeenCalledWith(expect.objectContaining({ ...baseInput, config: expect.objectContaining(baseInput.config) }), "1", "user:1");
   });
 
   it("requires authentication for analysis submission and result inspection", async () => {

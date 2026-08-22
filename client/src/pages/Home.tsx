@@ -90,7 +90,7 @@ type Representation = {
   validity?: { connectivityScore: number; leafCoverage: number; parentAreaConservationError: number; hierarchyCycleCount: number; valid: boolean };
   graph_metadata?: { relationshipDensity: number; candidateSources: string[] };
   scale_correspondence?: { method: string; links: Array<{ sourceId: string; targetId: string; confidence: number; cost: number; iou: number; centroidDistance: number }> };
-  segmentationDiagnostics?: Record<string, { strategy: string; entityCount: number; meanBoundaryEdgeStrength: number; requestedSegments: number }>;
+  segmentationDiagnostics?: Record<string, { strategy: string; entityCount: number; meanBoundaryEdgeStrength: number; requestedSegments: number; rawSegments?: number; actualSegments?: number; degenerate?: boolean; fallbackAction?: string; maxInitialSegments?: number }>;
   profiling: Record<string, number>;
   artifactStorage?: { basis: string; totalBytes: number; files: Record<string, number> };
   parameterSensitivity?: { schema: string; design: string; interpretation: string; records: Array<{ label: string; entityCountByType: Record<string, number>; relationshipCount: number; quality: { psnr: number; ssim: number; processingTimeMs: number }; artifactStorageBytes: number }> } | null;
@@ -289,6 +289,7 @@ export default function Home() {
   const [maxFileSizeMb, setMaxFileSizeMb] = useState(8);
   const [slicSegments, setSlicSegments] = useState(72);
   const [compactness, setCompactness] = useState(10);
+  const [minimumRegionPixels, setMinimumRegionPixels] = useState(12);
   const [segmentationStrategy, setSegmentationStrategy] = useState<"slic" | "watershed" | "felzenszwalb">("slic");
   const [reconstructionProfile, setReconstructionProfile] = useState<"fast" | "balanced" | "accurate">("balanced");
   const [residualEnabled, setResidualEnabled] = useState(true);
@@ -393,8 +394,7 @@ export default function Home() {
     setReportedFailureJobId(jobStatus.jobId);
   }, [jobStatus, reportedFailureJobId]);
 
-  function changeFile(event: ChangeEvent<HTMLInputElement>) {
-    const incoming = event.target.files?.[0] ?? null;
+  function selectFile(incoming: File | null) {
     if (!incoming) return;
     if (!new Set(["image/png", "image/jpeg", "image/webp"]).has(incoming.type)) {
       toast.error("Upload a PNG, JPEG, or WebP image.");
@@ -420,6 +420,26 @@ export default function Home() {
     const nextSourceUrl = URL.createObjectURL(incoming);
     sourceUrlRef.current = nextSourceUrl;
     setSourceUrl(nextSourceUrl);
+    const dimensionProbe = new Image();
+    dimensionProbe.onload = () => {
+      URL.revokeObjectURL(dimensionProbe.src);
+      if (dimensionProbe.width * dimensionProbe.height > 786_432) {
+        setFile(current => current === incoming ? null : current);
+        if (sourceUrlRef.current === nextSourceUrl) { URL.revokeObjectURL(nextSourceUrl); sourceUrlRef.current = null; setSourceUrl(null); }
+        toast.error("This image exceeds the 786,432-pixel analysis limit. Choose a smaller image before upload.");
+      }
+    };
+    dimensionProbe.onerror = () => URL.revokeObjectURL(dimensionProbe.src);
+    dimensionProbe.src = URL.createObjectURL(incoming);
+  }
+
+  function changeFile(event: ChangeEvent<HTMLInputElement>) {
+    selectFile(event.target.files?.[0] ?? null);
+  }
+
+  function dropFile(event: React.DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    selectFile(event.dataTransfer.files?.[0] ?? null);
   }
 
   function errorCoordinateFromPointer(event: React.PointerEvent<HTMLDivElement>) {
@@ -472,7 +492,8 @@ export default function Home() {
           scaleLevels,
           slicSegments,
           slicCompactness: compactness,
-          minimumRegionPixels: 12,
+          minimumRegionPixels,
+          maxInitialSegments: 320,
           runScaleConsistency: true,
           maxConsistencyPixels: 786432,
           crossScaleOverlapThreshold: 0.20,
@@ -554,10 +575,10 @@ export default function Home() {
         <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
           <section className="rounded-xl border border-cyan-100/10 bg-slate-900/80 p-4 shadow-2xl shadow-slate-950/20">
             <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100"><UploadCloud className="h-4 w-4 text-cyan-300" /> Source image</div>
-            <label className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-cyan-300/25 bg-cyan-300/[0.035] px-4 text-center transition-colors hover:border-cyan-300/60 hover:bg-cyan-300/[0.08]">
+            <label onDragOver={event => event.preventDefault()} onDrop={dropFile} className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-cyan-300/25 bg-cyan-300/[0.035] px-4 text-center transition-colors hover:border-cyan-300/60 hover:bg-cyan-300/[0.08]">
               <ImageUp className="mb-2 h-6 w-6 text-cyan-300 transition-transform group-hover:-translate-y-0.5" />
               <span className="text-sm font-medium text-slate-200">Drop an image or browse</span>
-              <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-500">PNG · JPEG · WebP</span>
+              <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-slate-500">PNG · JPEG · WebP · ≤786,432 px</span>
               <Input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={changeFile} />
             </label>
             {file ? <div className="mt-3 rounded-md border border-white/8 bg-black/20 px-3 py-2 text-xs"><p className="truncate font-medium text-slate-200">{file.name}</p><p className="mt-0.5 font-mono text-[10px] text-slate-500">{formatBytes(file.size)} · {file.type.replace("image/", "").toUpperCase()}</p></div> : null}
@@ -579,12 +600,17 @@ export default function Home() {
                 <Slider value={[compactness]} onValueChange={value => setCompactness(value[0] ?? 10)} min={2} max={30} step={1} />
               </div>
               <div>
+                <div className="mb-2 flex justify-between"><Label className="text-xs text-slate-300">Minimum region area</Label><span className="font-mono text-xs text-cyan-200">{minimumRegionPixels} px</span></div>
+                <Slider aria-label="Minimum region area" value={[minimumRegionPixels]} onValueChange={value => setMinimumRegionPixels(value[0] ?? 12)} min={1} max={128} step={1} />
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">Smaller connected segments are merged before hierarchy construction.</p>
+              </div>
+              <div>
                 <Label className="mb-2 block text-xs text-slate-300">Multi-scale levels</Label>
                 <div className="grid grid-cols-4 gap-1.5">
                   {availableScales.map(scale => <Button key={scale} type="button" variant="outline" size="sm" onClick={() => toggleScale(scale)} className={cn("border-white/10 bg-white/[0.025] font-mono text-xs text-slate-400 hover:bg-white/10", scaleLevels.includes(scale) && "border-cyan-300/50 bg-cyan-300/10 text-cyan-100")}>{scale}×</Button>)}
                 </div>
               </div>
-              <div><Label className="mb-2 block text-xs text-slate-300">Segmentation baseline</Label><div className="grid grid-cols-3 gap-1">{(["slic", "watershed", "felzenszwalb"] as const).map(strategy => <Button key={strategy} type="button" variant="outline" size="sm" onClick={() => setSegmentationStrategy(strategy)} className={cn("h-7 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", segmentationStrategy === strategy && "border-cyan-300/45 bg-cyan-300/10 text-cyan-100")}>{strategy === "felzenszwalb" ? "GRAPH" : strategy.toUpperCase()}</Button>)}</div></div>
+              <div><Label className="mb-2 block text-xs text-slate-300">Segmentation baseline</Label><div className="grid grid-cols-3 gap-1">{(["slic", "watershed", "felzenszwalb"] as const).map(strategy => <Button key={strategy} type="button" variant="outline" size="sm" onClick={() => setSegmentationStrategy(strategy)} className={cn("h-7 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", segmentationStrategy === strategy && "border-cyan-300/45 bg-cyan-300/10 text-cyan-100")}>{strategy === "felzenszwalb" ? "FELZ." : strategy.toUpperCase()}</Button>)}</div></div>
               <div><Label className="mb-2 block text-xs text-slate-300">Reconstruction profile</Label><div className="grid grid-cols-3 gap-1">{(["fast", "balanced", "accurate"] as const).map(profile => <Button key={profile} type="button" variant="outline" size="sm" onClick={() => setReconstructionProfile(profile)} className={cn("h-7 border-white/10 bg-black/20 px-1 font-mono text-[9px] text-slate-500", reconstructionProfile === profile && "border-emerald-300/45 bg-emerald-300/10 text-emerald-100")}>{profile.toUpperCase()}</Button>)}</div></div>
               <div><div className="mb-2 flex items-center justify-between"><Label className="text-xs text-slate-300">Residual detail</Label><Button type="button" variant="outline" size="sm" onClick={() => setResidualEnabled(value => !value)} className={cn("h-6 border-white/10 bg-black/20 px-2 font-mono text-[9px]", residualEnabled ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" : "text-slate-500")}>{residualEnabled ? "ON" : "OFF"}</Button></div><div className={cn(!residualEnabled && "opacity-40")}><div className="mb-1 flex justify-between font-mono text-[9px] text-slate-500"><span>Residual budget</span><span>{residualBudgetKb} KB</span></div><Slider value={[residualBudgetKb]} onValueChange={value => setResidualBudgetKb(value[0] ?? 192)} min={0} max={512} step={16} disabled={!residualEnabled} /></div></div>
               <div><div className="mb-1 flex items-center justify-between"><Label className="text-xs text-slate-300">Sensitivity evidence</Label><Button type="button" variant="outline" size="sm" onClick={() => setRunParameterSensitivity(value => !value)} className={cn("h-6 border-white/10 bg-black/20 px-2 font-mono text-[9px]", runParameterSensitivity ? "border-violet-300/40 bg-violet-300/10 text-violet-100" : "text-slate-500")}>{runParameterSensitivity ? "5 VARIANTS" : "OFF"}</Button></div><p className="text-[10px] leading-relaxed text-slate-500">Runs a bounded server-side parameter sweep for internal dependence evidence, not semantic invariance.</p></div>

@@ -98,6 +98,12 @@ New analyses use a conservative `mergeEnergyThreshold` default of `0.05`. This a
 
 Derived region, composite, and entity cuts can resolve to the same tree nodes in a shallow hierarchy. Equivalent sparse graph records are emitted once with `derivedCutViews` membership rather than repeated as indistinguishable edge payloads. The retired `mergeThreshold` field is not part of the active public or serialized configuration contract.
 
+## Segmentation Admissibility and Runtime Bounds
+
+Every segmentation run records requested, raw, and final region counts together with `degenerate`, `fallbackAction`, and `maxInitialSegments`. A low-coherence SLIC result that collapses to too few regions is retried without connectivity enforcement and, if still degenerate, replaced by a deterministic connected grid partition. This fallback preserves a bounded inspectable partition; it does not claim perceptual or semantic meaning.
+
+Felzenszwalb and other high-cardinality outputs are reduced to the configured initial-region ceiling before pixel-feature entities or hierarchy candidates are built. The active global merge tree receives sparse 4-neighbour topology from the native label map and updates that topology after every accepted union, avoiding repeated all-pairs active-mask adjacency discovery. Child-process failures retain diagnostic stderr only in server logs; protected API clients receive a concise actionable failure message.
+
 ## Parameter-Sensitivity Evidence
 
 When `runParameterSensitivity` is enabled, the server runs a bounded deterministic set of one-factor-family variations: coarser/finer SLIC partitioning, conservative/permissive **merge-energy and boundary-barrier** settings, and native-scale-only analysis. `sensitivityVariantLimit` is capped at five. The resulting `ParameterSensitivity@0.7` report records changed settings, entity counts, relationship counts, PSNR/SSIM/runtime, emitted bundle bytes, and configuration hashes.
