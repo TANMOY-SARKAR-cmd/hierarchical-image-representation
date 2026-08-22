@@ -26,6 +26,12 @@ Directly importing the public entry module in the browser returned `TypeError: C
 
 The final build correction also removes the React-only manual chunk boundary that created the faulty interop path. Deferred execution timeline, result inspection studio, timing-history exporter, data-client, UI-primitives, icon, and vendor bundles remain split; React now remains with its compatible package graph in the vendor bundle. This trades a separately cacheable React runtime for a reliable public bootstrap.
 
+After the first correction checkpoint, the public domain advanced from its oldest entry asset to an intermediate entry (`index-arROVv9j.js`) that still referenced `react-runtime-AELfOP13.js` and still failed on `createContext`. The final no-React-runtime-split checkpoint was saved afterward; public verification must wait for the entry manifest to change to that final build before interpreting the remaining failure as a source defect.
+
+## Verified resolution
+
+After the final deployment event propagated, a fresh public browser session rendered the full workbench header, image upload control, segmentation choices, advanced configuration, and analysis controls in place of the loading panel. The public console reported no startup error. This confirms the React compatibility fix and safer bundle layout resolved the production bootstrap failure.
+
 ## Immediate next diagnostic steps
 
 The deployed HTML and production asset routing need inspection to determine whether the entry module is missing, blocked, or failing before console capture. The implementation will add a safe first-paint fallback and module-level recovery so the workbench cannot silently collapse to an empty page.

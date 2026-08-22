@@ -166,7 +166,7 @@
 - [x] Recover a resilient non-white first paint, validate persisted theme state, and show an actionable rendering-recovery surface.
 - [x] Defer heavy completed-result inspection and comparison modules until the user explicitly opens them.
 - [x] Add bounded owner-private retained timing history and CSV/JSON timing-comparison downloads.
-- [ ] Add UI, router, retention, report-format, bundle, and published-lifecycle regressions for the rendering/performance/export release.
-- [ ] Validate, document, checkpoint, synchronize, and deliver the rendering recovery, deferred-inspector, and timing-history export release.
-- [ ] Diagnose the public entry-module bootstrap stall and add explicit ready/failure state reporting without exposing private analysis data.
-- [ ] Add startup-recovery regressions and prove the current production build mounts past the visible loading fallback on the public domain.
+- [x] Add UI, router, retention, report-format, bundle, and published-lifecycle regressions for the rendering/performance/export release.
+- [x] Validate, document, checkpoint, synchronize, and deliver the rendering recovery, deferred-inspector, and timing-history export release.
+- [x] Diagnose the public entry-module bootstrap stall and add explicit ready/failure state reporting without exposing private analysis data.
+- [x] Add startup-recovery regressions and prove the current production build mounts past the visible loading fallback on the public domain.
