@@ -137,6 +137,24 @@ describe("Hierarchy workbench UI", () => {
     expect(view.getByRole("progressbar", { name: "Advanced ETA range progress" })).toBeInTheDocument();
   });
 
+  it("discloses a bounded active merge-tree allowance without presenting it as a completion guarantee", () => {
+    const now = Date.now();
+    const view = render(<AnalysisProgressPanel job={{ jobId: "job-1", status: "running", stage: "merge_tree", percent: 58, message: "Scoring merge energy.", createdAt: now - 121_000, updatedAt: now, completedAt: null, expiresAt: now + 1_800_000, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 121_000, stages: [], advancedEta: null, processBudgetAllowance: { initialBudgetMs: 120_000, grantedBudgetMs: 150_000, maximumBudgetMs: 300_000, extensionCount: 1, lastExtendedAt: now } } }} />);
+    expect(view.getByText(/deterministic hierarchy is still reporting progress/i)).toBeInTheDocument();
+    expect(view.getByText(/bounded server allowance is active/i)).toBeInTheDocument();
+    expect(view.getByText(/will still stop if progress becomes silent/i)).toBeInTheDocument();
+  });
+
+  it("does not show a merge-tree allowance after a terminal result or outside merge-tree work", () => {
+    const now = Date.now();
+    const allowance = { initialBudgetMs: 120_000, grantedBudgetMs: 150_000, maximumBudgetMs: 300_000, extensionCount: 1, lastExtendedAt: now };
+    const terminal = render(<AnalysisProgressPanel job={{ jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Done.", createdAt: now - 150_000, updatedAt: now, completedAt: now, expiresAt: now + 1_800_000, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 150_000, stages: [], advancedEta: null, processBudgetAllowance: allowance } }} />);
+    expect(terminal.queryByText(/bounded server allowance is active/i)).not.toBeInTheDocument();
+    terminal.unmount();
+    const otherStage = render(<AnalysisProgressPanel job={{ jobId: "job-1", status: "running", stage: "reconstruction", percent: 88, message: "Reconstructing.", createdAt: now - 150_000, updatedAt: now, completedAt: null, expiresAt: now + 1_800_000, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 150_000, stages: [], advancedEta: null, processBudgetAllowance: allowance } }} />);
+    expect(otherStage.queryByText(/bounded server allowance is active/i)).not.toBeInTheDocument();
+  });
+
   it("shows the five-variant duration guidance and retries the selected file after a terminal failure", async () => {
     startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
     jobStatusQuery.data = { jobId: "job-1", status: "failed", stage: "failed", percent: 89, message: "Analysis did not complete.", createdAt: Date.now() - 10_000, updatedAt: Date.now(), completedAt: Date.now(), expiresAt: Date.now() + 1_800_000, error: "The advanced sensitivity study exceeded its bounded processing time.", resultAvailable: false };

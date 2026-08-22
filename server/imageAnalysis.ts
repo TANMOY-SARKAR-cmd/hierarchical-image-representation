@@ -98,11 +98,20 @@ export type AdvancedEtaRange = {
   basis: "advanced_budget" | "observed_progress" | "sensitivity_variant";
 };
 
+export type ProcessBudgetAllowance = {
+  initialBudgetMs: number;
+  grantedBudgetMs: number;
+  maximumBudgetMs: number;
+  extensionCount: number;
+  lastExtendedAt: number;
+};
+
 export type AnalysisTimingSnapshot = {
   schema: "AnalysisTiming@1";
   totalElapsedMs: number;
   stages: AnalysisStageTiming[];
   advancedEta: AdvancedEtaRange | null;
+  processBudgetAllowance?: ProcessBudgetAllowance | null;
 };
 
 export type AnalysisFailureReceipt = {
@@ -163,6 +172,9 @@ const DEFAULT_MAX_INFLIGHT_ANALYSES = 2;
 const DEFAULT_PROGRESS_TIMEOUT_MS = 45 * 1000;
 const DEFAULT_ENGINE_STARTUP_TIMEOUT_MS = 90 * 1000;
 const DEFAULT_PROCESS_TIMEOUT_MS = 120 * 1000;
+const DEFAULT_MAX_NORMAL_PROCESS_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_MERGE_TREE_BUDGET_EXTENSION_MS = 30 * 1000;
+const DEFAULT_MERGE_TREE_HEARTBEAT_FRESHNESS_MS = 10 * 1000;
 const DEFAULT_SENSITIVITY_VARIANT_TIMEOUT_MS = 60 * 1000;
 const DEFAULT_MAX_ADVANCED_PROCESS_TIMEOUT_MS = 7 * 60 * 1000;
 const ERROR_HEATMAP_REFERENCE_DELTA = 32;
@@ -185,6 +197,37 @@ function processTimeoutFor(config: Pick<AnalysisConfig, "runParameterSensitivity
   const additionalPerVariantMs = positiveInteger(process.env.ANALYSIS_SENSITIVITY_VARIANT_TIMEOUT_MS, DEFAULT_SENSITIVITY_VARIANT_TIMEOUT_MS);
   const maximumAdvancedBudgetMs = positiveInteger(process.env.ANALYSIS_MAX_ADVANCED_PROCESS_TIMEOUT_MS, DEFAULT_MAX_ADVANCED_PROCESS_TIMEOUT_MS);
   return Math.min(maximumAdvancedBudgetMs, normalBudgetMs + variantCount * additionalPerVariantMs);
+}
+
+function initialProcessBudgetAllowance(config: Pick<AnalysisConfig, "runParameterSensitivity" | "sensitivityVariantLimit">): ProcessBudgetAllowance | null {
+  if (config.runParameterSensitivity) return null;
+  const initialBudgetMs = processTimeoutFor(config);
+  const configuredMaximumMs = positiveInteger(process.env.ANALYSIS_MAX_NORMAL_PROCESS_TIMEOUT_MS, DEFAULT_MAX_NORMAL_PROCESS_TIMEOUT_MS);
+  return {
+    initialBudgetMs,
+    grantedBudgetMs: initialBudgetMs,
+    maximumBudgetMs: Math.max(initialBudgetMs, configuredMaximumMs),
+    extensionCount: 0,
+    lastExtendedAt: 0,
+  };
+}
+
+function nextMergeTreeBudgetAllowance(input: {
+  config: Pick<AnalysisConfig, "runParameterSensitivity" | "sensitivityVariantLimit">;
+  allowance: ProcessBudgetAllowance | null;
+  stage: string;
+  lastMergeTreeHeartbeatAt: number;
+  now: number;
+  progressTimeoutMs: number;
+}): ProcessBudgetAllowance | null {
+  const { config, allowance, stage, lastMergeTreeHeartbeatAt, now, progressTimeoutMs } = input;
+  if (config.runParameterSensitivity || !allowance || stage !== "merge_tree") return null;
+  const heartbeatFreshnessMs = Math.min(progressTimeoutMs, positiveInteger(process.env.ANALYSIS_MERGE_TREE_HEARTBEAT_FRESHNESS_MS, DEFAULT_MERGE_TREE_HEARTBEAT_FRESHNESS_MS));
+  if (lastMergeTreeHeartbeatAt <= 0 || now - lastMergeTreeHeartbeatAt > heartbeatFreshnessMs || allowance.grantedBudgetMs >= allowance.maximumBudgetMs) return null;
+  const extensionMs = positiveInteger(process.env.ANALYSIS_MERGE_TREE_BUDGET_EXTENSION_MS, DEFAULT_MERGE_TREE_BUDGET_EXTENSION_MS);
+  const grantedBudgetMs = Math.min(allowance.maximumBudgetMs, allowance.grantedBudgetMs + extensionMs);
+  if (grantedBudgetMs <= allowance.grantedBudgetMs) return null;
+  return { ...allowance, grantedBudgetMs, extensionCount: allowance.extensionCount + 1, lastExtendedAt: now };
 }
 
 function processingLimitMessage(config: AnalysisConfig) {
@@ -255,7 +298,7 @@ function advancedEtaFor(config: Pick<AnalysisConfig, "runParameterSensitivity" |
 
 function completedJobSnapshot(job: AnalysisJobStatus, now: number): AnalysisJobStatus {
   const stages = (job.timing?.stages ?? []).map(entry => entry.endedAt === null ? { ...entry, endedAt: now, durationMs: Math.max(0, now - entry.startedAt) } : entry);
-  return { ...job, status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, expiresAt: now + DEFAULT_RESULT_TTL_MS, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1", totalElapsedMs: Math.max(0, now - job.createdAt), stages, advancedEta: null } };
+  return { ...job, status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, expiresAt: now + DEFAULT_RESULT_TTL_MS, error: null, resultAvailable: true, timing: { schema: "AnalysisTiming@1", totalElapsedMs: Math.max(0, now - job.createdAt), stages, advancedEta: null, processBudgetAllowance: job.timing?.processBudgetAllowance ?? null } };
 }
 
 export class AnalysisAdmissionError extends Error {
@@ -386,7 +429,7 @@ export class AnalysisJobStore {
   create(jobId: string, ownerId: string, now = Date.now(), config?: Pick<AnalysisConfig, "runParameterSensitivity" | "sensitivityVariantLimit">) {
     this.purge(now);
     if (config) this.configs.set(jobId, config);
-    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, expiresAt: now + this.ttlMs, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 0, stages: [{ stage: "queued", label: stageLabel("queued"), startedAt: now, endedAt: null, durationMs: 0, messages: [{ message: "Queued for secure server-side analysis.", at: now, offsetMs: 0 }] }], advancedEta: null } };
+    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, expiresAt: now + this.ttlMs, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1", totalElapsedMs: 0, stages: [{ stage: "queued", label: stageLabel("queued"), startedAt: now, endedAt: null, durationMs: 0, messages: [{ message: "Queued for secure server-side analysis.", at: now, offsetMs: 0 }] }], advancedEta: null, processBudgetAllowance: null } };
     this.jobs.set(jobId, job);
     return this.snapshot(job, now);
   }
@@ -399,7 +442,7 @@ export class AnalysisJobStore {
     const stages = currentStage?.stage === update.stage
       ? [...existingStages.slice(0, -1), appendStageMessage(currentStage, update.message, now)]
       : [...this.closeOpenStages(existingStages, now), { stage: update.stage, label: stageLabel(update.stage), startedAt: now, endedAt: null, durationMs: 0, messages: [{ message: safeStageMessage(update.message), at: now, offsetMs: 0 }] }];
-    const next = { ...job, ...update, percent: Math.max(job.percent, Math.min(99, Math.round(update.percent))), updatedAt: now, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages, advancedEta: null } };
+    const next = { ...job, ...update, percent: Math.max(job.percent, Math.min(99, Math.round(update.percent))), updatedAt: now, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages, advancedEta: null, processBudgetAllowance: job.timing?.processBudgetAllowance ?? null } };
     this.jobs.set(jobId, next);
     return this.snapshot(next, now);
   }
@@ -422,7 +465,7 @@ export class AnalysisJobStore {
     const job = this.jobs.get(jobId);
     if (!job) return null;
     if (terminalStatus(job.status)) return this.snapshot(job, now);
-    const next = { ...job, status: "failed" as const, stage: "failed", message: "Analysis did not complete.", updatedAt: now, completedAt: now, error, resultAvailable: false, ...(failureReceipt ? { failureReceipt } : {}), timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null } };
+    const next = { ...job, status: "failed" as const, stage: "failed", message: "Analysis did not complete.", updatedAt: now, completedAt: now, error, resultAvailable: false, ...(failureReceipt ? { failureReceipt } : {}), timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null, processBudgetAllowance: job.timing?.processBudgetAllowance ?? null } };
     this.jobs.set(jobId, next);
     return this.snapshot(next, now);
   }
@@ -430,7 +473,7 @@ export class AnalysisJobStore {
   cancel(jobId: string, now = Date.now()) {
     const job = this.jobs.get(jobId);
     if (!job || job.status === "completed" || job.status === "failed" || job.status === "cancelled") return null;
-    const next = { ...job, status: "cancelled" as const, stage: "cancelled", message: "Analysis was cancelled before completion.", updatedAt: now, completedAt: now, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null } };
+    const next = { ...job, status: "cancelled" as const, stage: "cancelled", message: "Analysis was cancelled before completion.", updatedAt: now, completedAt: now, error: null, resultAvailable: false, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: this.closeOpenStages(job.timing?.stages ?? [], now), advancedEta: null, processBudgetAllowance: job.timing?.processBudgetAllowance ?? null } };
     this.jobs.set(jobId, next);
     return this.snapshot(next, now);
   }
@@ -439,6 +482,14 @@ export class AnalysisJobStore {
     this.purge(now);
     const job = this.jobs.get(jobId);
     return job ? this.snapshot(job, now) : null;
+  }
+
+  recordProcessBudgetAllowance(jobId: string, allowance: ProcessBudgetAllowance, now = Date.now()) {
+    const job = this.jobs.get(jobId);
+    if (!job || terminalStatus(job.status)) return null;
+    const next = { ...job, updatedAt: now, timing: { schema: "AnalysisTiming@1" as const, totalElapsedMs: Math.max(0, now - job.createdAt), stages: job.timing?.stages ?? [], advancedEta: null, processBudgetAllowance: allowance } };
+    this.jobs.set(jobId, next);
+    return this.snapshot(next, now);
   }
 
   remove(jobId: string) {
@@ -457,7 +508,7 @@ export class AnalysisJobStore {
 
   private snapshot(job: AnalysisJobStatus, now: number): AnalysisJobStatus {
     const stages = (job.timing?.stages ?? []).map(entry => ({ ...entry, durationMs: entry.endedAt === null ? Math.max(0, now - entry.startedAt) : entry.durationMs }));
-    const timing: AnalysisTimingSnapshot = { schema: "AnalysisTiming@1", totalElapsedMs: Math.max(0, (job.completedAt ?? now) - job.createdAt), stages, advancedEta: advancedEtaFor(this.configs.get(job.jobId), job, now) };
+    const timing: AnalysisTimingSnapshot = { schema: "AnalysisTiming@1", totalElapsedMs: Math.max(0, (job.completedAt ?? now) - job.createdAt), stages, advancedEta: advancedEtaFor(this.configs.get(job.jobId), job, now), processBudgetAllowance: job.timing?.processBudgetAllowance ?? null };
     return { ...job, timing };
   }
 
@@ -515,7 +566,7 @@ function preflightAnalysisInput(input: { fileName: string; mimeType: string; dat
   return { data, extension };
 }
 
-function runPython(inputPath: string, outputPath: string, config: AnalysisConfig, onProgress?: (event: AnalysisProgressEvent) => void, jobId?: string) {
+function runPython(inputPath: string, outputPath: string, config: AnalysisConfig, onProgress?: (event: AnalysisProgressEvent) => void, jobId?: string, onBudgetAllowance?: (allowance: ProcessBudgetAllowance) => void) {
   const scriptPath = path.join(process.cwd(), "python_engine", "representation_engine.py");
   const python = process.env.PYTHON_EXECUTABLE ?? "python3";
   return new Promise<void>((resolve, reject) => {
@@ -533,8 +584,12 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
     let engineReadyObserved = false;
     let settled = false;
     const progressTimeoutMs = positiveInteger(process.env.ANALYSIS_PROGRESS_TIMEOUT_MS, DEFAULT_PROGRESS_TIMEOUT_MS);
-    const processTimeoutMs = processTimeoutFor(config);
+    const initialBudgetMs = processTimeoutFor(config);
+    let processBudgetAllowance = initialProcessBudgetAllowance(config);
+    let processTimeoutMs = processBudgetAllowance?.grantedBudgetMs ?? initialBudgetMs;
+    const processStartedAt = Date.now();
     const startupTimeoutMs = Math.min(processTimeoutMs, positiveInteger(process.env.ANALYSIS_ENGINE_STARTUP_TIMEOUT_MS, DEFAULT_ENGINE_STARTUP_TIMEOUT_MS));
+    let lastMergeTreeHeartbeatAt = 0;
     let awaitingEngineReady = true;
     let livenessTimeout: ReturnType<typeof setTimeout> | null = null;
     let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -574,6 +629,24 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
       if (!settleReject(error)) return;
       processHandle.kill("SIGKILL");
     };
+    const armProcessBudgetTimeout = () => {
+      if (timeout) clearTimeout(timeout);
+      const remainingBudgetMs = Math.max(1, processTimeoutMs - Math.max(0, Date.now() - processStartedAt));
+      timeout = setTimeout(() => {
+        const now = Date.now();
+        const extended = nextMergeTreeBudgetAllowance({ config, allowance: processBudgetAllowance, stage: lastProgressStage, lastMergeTreeHeartbeatAt, now, progressTimeoutMs });
+        if (extended) {
+          processBudgetAllowance = extended;
+          processTimeoutMs = extended.grantedBudgetMs;
+          onBudgetAllowance?.(extended);
+          console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} received bounded merge-tree budget extension ${extended.extensionCount}; total allowance ${extended.grantedBudgetMs} ms of ${extended.maximumBudgetMs} ms.`);
+          armProcessBudgetTimeout();
+          return;
+        }
+        console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} exceeded its ${config.runParameterSensitivity ? "advanced" : "standard"} processing budget after ${processTimeoutMs} ms.`);
+        terminateWith(failure("process_budget", processingLimitMessage(config)));
+      }, remainingBudgetMs);
+    };
     const armLivenessTimeout = () => {
       clearLivenessTimeout();
       livenessTimeout = setTimeout(() => {
@@ -583,10 +656,7 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
         terminateWith(failure(awaitingEngineReady ? "startup_silence" : "stage_silence", `The analysis engine stopped reporting progress during ${stage} and was safely stopped. You can retry the same analysis.`));
       }, awaitingEngineReady ? startupTimeoutMs : progressTimeoutMs);
     };
-    timeout = setTimeout(() => {
-      console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} exceeded its ${config.runParameterSensitivity ? "advanced" : "standard"} processing budget after ${processTimeoutMs} ms.`);
-      terminateWith(failure("process_budget", processingLimitMessage(config)));
-    }, processTimeoutMs);
+    armProcessBudgetTimeout();
     console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} started Python analysis with ${config.runParameterSensitivity ? "advanced" : "standard"} processing budget ${processTimeoutMs} ms.`);
     armLivenessTimeout();
     processHandle.on("spawn", () => {
@@ -602,7 +672,9 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
         try {
           const event = JSON.parse(line) as { event?: string; stage?: string; percent?: number; message?: string };
           if (event.event === "progress" && typeof event.stage === "string" && typeof event.percent === "number" && typeof event.message === "string") {
+            const progressAt = Date.now();
             lastProgressStage = event.stage;
+            if (!config.runParameterSensitivity && event.stage === "merge_tree") lastMergeTreeHeartbeatAt = progressAt;
             if (event.stage === "initializing_engine") startupHeartbeatObserved = true;
             else {
               awaitingEngineReady = false;
@@ -724,7 +796,7 @@ export async function analyzeImage(input: {
   mimeType: string;
   dataBase64: string;
   config: AnalysisConfig;
-}, ownerId = "direct", admissionKey = `direct:${ownerId}`, run?: { jobId?: string; onProgress?: (event: AnalysisProgressEvent) => void; completedSnapshot?: () => AnalysisJobStatus | null; admissionReserved?: boolean }): Promise<AnalysisResult> {
+}, ownerId = "direct", admissionKey = `direct:${ownerId}`, run?: { jobId?: string; onProgress?: (event: AnalysisProgressEvent) => void; onBudgetAllowance?: (allowance: ProcessBudgetAllowance) => void; completedSnapshot?: () => AnalysisJobStatus | null; admissionReserved?: boolean }): Promise<AnalysisResult> {
   run?.onProgress?.({ status: "running", stage: "validating_input", percent: 1, message: "Validating the uploaded image and configured limits." });
   const { extension, data } = preflightAnalysisInput(input);
 
@@ -737,7 +809,7 @@ export async function analyzeImage(input: {
     try {
       await fs.mkdir(outputPath, { recursive: true });
       await fs.writeFile(inputPath, data);
-      await runPython(inputPath, outputPath, input.config, run?.onProgress, run?.jobId);
+      await runPython(inputPath, outputPath, input.config, run?.onProgress, run?.jobId, run?.onBudgetAllowance);
       const representation = JSON.parse(await fs.readFile(path.join(outputPath, "representation.json"), "utf8")) as Record<string, unknown>;
     run?.onProgress?.({ status: "uploading", stage: "uploading_artifacts", percent: 97, message: "Uploading private analysis artifacts for the completed run." });
     const residualEnergyUrl = await uploadArtifact(jobId, outputPath, "errors/residual-energy.png", "image/png");
@@ -876,7 +948,11 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
     throw error;
   }
   let latestJob: AnalysisJobStatus = job;
-  void analyzeImage(input, ownerId, admissionKey, { jobId, admissionReserved: true, completedSnapshot: () => completedJobSnapshot(latestJob, Date.now()), onProgress: update => {
+  void analyzeImage(input, ownerId, admissionKey, { jobId, admissionReserved: true, completedSnapshot: () => completedJobSnapshot(latestJob, Date.now()), onBudgetAllowance: allowance => {
+    const currentJob = activeJobs.recordProcessBudgetAllowance(jobId, allowance);
+    if (currentJob) latestJob = currentJob;
+    void saveAnalysisManifest({ jobId, ownerId, status: "running", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), progressSnapshot: currentJob ? JSON.stringify(currentJob) : null }).catch(() => undefined);
+  }, onProgress: update => {
     const currentJob = activeJobs.update(jobId, update);
     if (currentJob) latestJob = currentJob;
     const status = update.status === "running" || update.status === "uploading" ? update.status : "queued";
@@ -958,6 +1034,8 @@ export function getAnalysisCacheTelemetry() {
 
 export const __testOnly = {
   processTimeoutFor,
+  initialProcessBudgetAllowance,
+  nextMergeTreeBudgetAllowance,
   seedActiveJob(jobId: string, ownerId: string, now = Date.now()) {
     return activeJobs.create(jobId, ownerId, now);
   },

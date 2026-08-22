@@ -90,6 +90,33 @@ describe("durable analysis lifecycle guard", () => {
     ]);
   });
 
+  it("grants a finite standard-budget extension only for recent active merge-tree heartbeats", () => {
+    const config = { runParameterSensitivity: false, sensitivityVariantLimit: 0 };
+    const initial = __testOnly.initialProcessBudgetAllowance(config);
+    expect(initial).toMatchObject({ initialBudgetMs: 120_000, grantedBudgetMs: 120_000, maximumBudgetMs: 300_000, extensionCount: 0 });
+
+    const extended = __testOnly.nextMergeTreeBudgetAllowance({ config, allowance: initial, stage: "merge_tree", lastMergeTreeHeartbeatAt: 119_000, now: 120_000, progressTimeoutMs: 45_000 });
+    expect(extended).toMatchObject({ grantedBudgetMs: 150_000, maximumBudgetMs: 300_000, extensionCount: 1, lastExtendedAt: 120_000 });
+    expect(__testOnly.nextMergeTreeBudgetAllowance({ config, allowance: initial, stage: "merge_tree", lastMergeTreeHeartbeatAt: 109_999, now: 120_000, progressTimeoutMs: 45_000 })).toBeNull();
+    expect(__testOnly.nextMergeTreeBudgetAllowance({ config, allowance: initial, stage: "reconstruction", lastMergeTreeHeartbeatAt: 119_000, now: 120_000, progressTimeoutMs: 45_000 })).toBeNull();
+  });
+
+  it("never extends advanced studies or exceeds the finite standard merge-tree ceiling", () => {
+    const primaryConfig = { runParameterSensitivity: false, sensitivityVariantLimit: 0 };
+    const maximum = { initialBudgetMs: 120_000, grantedBudgetMs: 300_000, maximumBudgetMs: 300_000, extensionCount: 6, lastExtendedAt: 270_000 };
+    expect(__testOnly.nextMergeTreeBudgetAllowance({ config: primaryConfig, allowance: maximum, stage: "merge_tree", lastMergeTreeHeartbeatAt: 299_000, now: 300_000, progressTimeoutMs: 45_000 })).toBeNull();
+    expect(__testOnly.initialProcessBudgetAllowance({ runParameterSensitivity: true, sensitivityVariantLimit: 5 })).toBeNull();
+  });
+
+  it("retains an owner-private merge-tree allowance through terminal timing snapshots", () => {
+    const store = new AnalysisJobStore(60_000);
+    store.create("merge-tree-allowance", ownerId, 1_000, { runParameterSensitivity: false, sensitivityVariantLimit: 0 });
+    store.update("merge-tree-allowance", { status: "running", stage: "merge_tree", percent: 58, message: "Scoring merge energy." }, 2_000);
+    const allowance = { initialBudgetMs: 120_000, grantedBudgetMs: 150_000, maximumBudgetMs: 300_000, extensionCount: 1, lastExtendedAt: 120_000 };
+    expect(store.recordProcessBudgetAllowance("merge-tree-allowance", allowance, 120_000)?.timing?.processBudgetAllowance).toEqual(allowance);
+    expect(store.complete("merge-tree-allowance", 140_000)?.timing?.processBudgetAllowance).toEqual(allowance);
+  });
+
   it("retains the first safe failure receipt and refuses stale terminal overwrites", () => {
     const store = new AnalysisJobStore(60_000);
     store.create("failure-receipt", ownerId, 1_000);
