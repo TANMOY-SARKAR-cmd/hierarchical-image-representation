@@ -10,6 +10,8 @@ The captured document referenced a complete set of successful JavaScript and CSS
 
 Immediately after the recovery implementation checkpoint, the public root still displayed the same white empty document. This must not be treated as validation success: the captured public page needs comparison against the newly generated build hashes and recovery markup before tracker completion. Local development rendering remains healthy.
 
+A second release-specific cache-busting request after the recovery republish still returned the prior blank document. The production response therefore appears pinned to an earlier asset manifest rather than the locally validated current build. Further live inspection is required before representing the public blank-page issue as resolved.
+
 ## Immediate next diagnostic steps
 
 The deployed HTML and production asset routing need inspection to determine whether the entry module is missing, blocked, or failing before console capture. The implementation will add a safe first-paint fallback and module-level recovery so the workbench cannot silently collapse to an empty page.

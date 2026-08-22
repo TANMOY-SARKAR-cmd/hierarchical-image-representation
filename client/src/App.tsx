@@ -1,5 +1,6 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import React, { useEffect } from "react";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -24,6 +25,10 @@ function Router() {
 // - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
 
 function App() {
+  useEffect(() => {
+    (window as Window & { __HIR_BOOTSTRAP__?: { markReady: () => void } }).__HIR_BOOTSTRAP__?.markReady();
+  }, []);
+
   return (
     <ErrorBoundary>
       <ThemeProvider

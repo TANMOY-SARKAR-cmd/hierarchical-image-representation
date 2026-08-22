@@ -187,6 +187,31 @@ html {
   text-transform: uppercase;
 }
 
+.app-loading--failed .app-loading__panel {
+  border-color: oklch(0.78 0.16 75 / 42%);
+}
+
+.app-loading__button {
+  margin-top: 1.25rem;
+  border: 1px solid oklch(0.78 0.16 195 / 45%);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  color: oklch(0.12 0.02 245);
+  background: oklch(0.78 0.16 195);
+  font: 600 0.75rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.app-loading__button:hover {
+  background: oklch(0.84 0.13 195);
+}
+
+.app-loading__button:focus-visible {
+  outline: 2px solid oklch(0.92 0.03 220);
+  outline-offset: 3px;
+}
+
 /* The scientific workbench defaults to dark, while this scoped layer preserves
    hierarchy and readable contrast when visitors choose the persisted light mode. */
 .hir-light {

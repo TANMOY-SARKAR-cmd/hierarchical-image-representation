@@ -8,6 +8,15 @@ import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
 
+declare global {
+  interface Window {
+    __HIR_BOOTSTRAP__?: {
+      markReady: () => void;
+      fail: (category?: string) => void;
+    };
+  }
+}
+
 const queryClient = new QueryClient();
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
@@ -72,10 +81,21 @@ const trpcClient = trpc.createClient({
   ],
 });
 
-createRoot(document.getElementById("root")!).render(
-  <trpc.Provider client={trpcClient} queryClient={queryClient}>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </trpc.Provider>
-);
+const rootElement = document.getElementById("root");
+
+if (!rootElement) {
+  window.__HIR_BOOTSTRAP__?.fail("The application root is unavailable.");
+  throw new Error("Missing application root element.");
+}
+
+try {
+  createRoot(rootElement).render(
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </trpc.Provider>
+  );
+} catch (error) {
+  window.__HIR_BOOTSTRAP__?.fail(error instanceof Error ? error.message : undefined);
+}

@@ -17,10 +17,50 @@
         }
       })();
     </script>
+    <script>
+      (function () {
+        var root = document.getElementById("root");
+        var ready = false;
+        var timeoutId = 0;
+
+        function safeCategory(value) {
+          if (typeof value !== "string") return "The application could not start.";
+          if (/failed to fetch dynamically imported module|importing a module script failed/i.test(value)) return "A required application module could not load.";
+          if (/chunkloaderror|loading chunk/i.test(value)) return "A required application chunk could not load.";
+          return "The application could not start.";
+        }
+
+        function showFailure(category) {
+          if (ready || !root) return;
+          root.dataset.startupState = "failed";
+          root.innerHTML = '<main class="app-loading app-loading--failed" aria-live="assertive"><section class="app-loading__panel"><p class="app-loading__eyebrow">Workbench recovery</p><h1>The workbench could not finish loading.</h1><p>' + safeCategory(category) + ' Refresh to retry. Your analysis data has not been sent by this screen.</p><button type="button" class="app-loading__button" onclick="window.location.reload()">Reload workbench</button></section></main>';
+        }
+
+        window.__HIR_BOOTSTRAP__ = {
+          markReady: function () {
+            if (ready) return;
+            ready = true;
+            if (timeoutId) window.clearTimeout(timeoutId);
+            if (root) root.dataset.startupState = "ready";
+          },
+          fail: showFailure
+        };
+
+        window.addEventListener("error", function (event) {
+          if (!ready) showFailure(event && event.message);
+        }, true);
+        window.addEventListener("unhandledrejection", function (event) {
+          if (!ready) showFailure(event && event.reason && event.reason.message);
+        });
+        timeoutId = window.setTimeout(function () {
+          showFailure("Startup timed out");
+        }, 10000);
+      })();
+    </script>
   </head>
 
   <body>
-    <div id="root">
+    <div id="root" data-startup-state="loading">
       <main id="app-loading" class="app-loading" aria-live="polite">
         <section class="app-loading__panel">
           <p class="app-loading__eyebrow">Scientific visual computing</p>
