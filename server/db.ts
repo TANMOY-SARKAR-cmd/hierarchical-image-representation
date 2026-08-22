@@ -92,10 +92,12 @@ export async function getUserByOpenId(openId: string) {
 export type PersistedAnalysisManifest = {
   jobId: string;
   ownerId: string;
-  status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled" | "discarded";
+  status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled" | "discarded" | "expired";
   expiresAt: Date;
   completedAt?: Date | null;
   discardedAt?: Date | null;
+  revokedAt?: Date | null;
+  revocationReason?: "discarded" | "expired" | null;
   error?: string | null;
   payload?: string | null;
 };
@@ -110,6 +112,8 @@ export async function saveAnalysisManifest(manifest: PersistedAnalysisManifest):
       expiresAt: manifest.expiresAt,
       completedAt: manifest.completedAt ?? null,
       discardedAt: manifest.discardedAt ?? null,
+      revokedAt: manifest.revokedAt ?? null,
+      revocationReason: manifest.revocationReason ?? null,
       error: manifest.error ?? null,
       payload: manifest.payload ?? null,
     },
@@ -124,8 +128,22 @@ export async function getAnalysisManifest(jobId: string) {
 }
 
 export async function discardAnalysisManifest(jobId: string, ownerId: string, now = new Date()): Promise<boolean> {
+  return revokeAnalysisManifest(jobId, ownerId, "discarded", now);
+}
+
+export async function expireAnalysisManifest(jobId: string, ownerId: string, now = new Date()): Promise<boolean> {
+  return revokeAnalysisManifest(jobId, ownerId, "expired", now);
+}
+
+async function revokeAnalysisManifest(jobId: string, ownerId: string, reason: "discarded" | "expired", now: Date): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  const result = await db.update(analysisManifests).set({ status: "discarded", discardedAt: now, payload: null }).where(and(eq(analysisManifests.jobId, jobId), eq(analysisManifests.ownerId, ownerId)));
+  const result = await db.update(analysisManifests).set({
+    status: reason,
+    payload: null,
+    discardedAt: reason === "discarded" ? now : null,
+    revokedAt: now,
+    revocationReason: reason,
+  }).where(and(eq(analysisManifests.jobId, jobId), eq(analysisManifests.ownerId, ownerId)));
   return Number(result[0]?.affectedRows ?? 0) > 0;
 }

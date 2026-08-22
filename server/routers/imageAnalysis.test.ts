@@ -103,10 +103,54 @@ describe("imageAnalysis router", () => {
     expect(setCookie).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps two anonymous browser workspaces isolated for status, result, cancellation, and discard", async () => {
+    const firstVisitor = "a".repeat(32);
+    const secondVisitor = "b".repeat(32);
+    const ownerId = `visitor:${firstVisitor}`;
+    const job = { jobId: "visitor-job", ownerId, status: "completed", stage: "completed", percent: 100, message: "Analysis result remains available.", createdAt: 1, updatedAt: 2, completedAt: 2, expiresAt: Date.now() + 60_000, error: null, resultAvailable: true };
+    const result = { jobId: "visitor-job", ownerId, representation: { entities: [], hierarchy: {}, relationships: [] }, artifactUrls: { representationJson: "/result.json", featuresNpz: "/features.npz", reconstructedPng: "/reconstructed.png", svg: "/reconstruction.svg", overlays: {}, reconstructions: {}, errors: {} } };
+    vi.mocked(getAnalysisJob).mockResolvedValue(job);
+    vi.mocked(getAnalysisResult).mockResolvedValue(result);
+    vi.mocked(cancelAnalysisJob).mockResolvedValue(job);
+    vi.mocked(discardAnalysisResult).mockImplementation(async (_jobId, requestedOwnerId) => requestedOwnerId === ownerId);
+    const first = imageAnalysisRouter.createCaller({ user: null, req: { headers: { cookie: `hir_analysis_visitor=${firstVisitor}` } }, res: { cookie: vi.fn() } } as never);
+    const second = imageAnalysisRouter.createCaller({ user: null, req: { headers: { cookie: `hir_analysis_visitor=${secondVisitor}` } }, res: { cookie: vi.fn() } } as never);
+
+    await expect(first.status({ jobId: "visitor-job" })).resolves.toMatchObject({ ownerId });
+    await expect(first.result({ jobId: "visitor-job" })).resolves.toMatchObject({ jobId: "visitor-job" });
+    await expect(second.status({ jobId: "visitor-job" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(second.result({ jobId: "visitor-job" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(second.cancel({ jobId: "visitor-job" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(second.discard({ jobId: "visitor-job" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("returns a not-found error for an unavailable owned in-memory result", async () => {
     vi.mocked(getAnalysisResult).mockReturnValue(null);
     const caller = imageAnalysisRouter.createCaller(userContext);
     await expect(caller.result({ jobId: "missing" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("denies every private result and evidence endpoint after access-only expiry or discard", async () => {
+    vi.mocked(getAnalysisJob).mockResolvedValue(null);
+    vi.mocked(getAnalysisResult).mockResolvedValue(null);
+    vi.mocked(getLocalErrorSample).mockRejectedValue(new Error("revoked"));
+    vi.mocked(getThresholdedErrorHeatmap).mockRejectedValue(new Error("revoked"));
+    const caller = imageAnalysisRouter.createCaller(userContext);
+
+    await expect(caller.status({ jobId: "revoked" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(caller.result({ jobId: "revoked" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(caller.entity({ jobId: "revoked", entityId: "entity-1" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(caller.hierarchy({ jobId: "revoked" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(caller.relationships({ jobId: "revoked" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(caller.artifacts({ jobId: "revoked" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(caller.localError({ jobId: "revoked", mode: "constant", x: 0, y: 0 })).rejects.toMatchObject({ code: "NOT_FOUND", message: expect.stringMatching(/current browser/i) });
+    await expect(caller.thresholdedHeatmap({ jobId: "revoked", mode: "constant", thresholdDelta: 1 })).rejects.toMatchObject({ code: "NOT_FOUND", message: expect.stringMatching(/current browser/i) });
+  });
+
+  it("does not expose unexpected bridge errors through public procedures", async () => {
+    vi.mocked(startAnalysisJob).mockRejectedValue(new Error("database connection password=not-for-users"));
+    const caller = imageAnalysisRouter.createCaller(userContext);
+    await expect(caller.start(baseInput)).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: "The analysis service could not complete this request. Please retry shortly." });
   });
 
   it("returns entity, hierarchy, relationship, and artifact views only to the result owner", async () => {

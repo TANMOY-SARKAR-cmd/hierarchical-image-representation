@@ -2,7 +2,7 @@
 
 ## Version 0.7.0
 
-Version **0.7.0** is a deterministic, non-semantic image-structure research workbench. An authenticated image submission is represented as dense pixel features, segmented micro-regions, a sparse relationship graph, a persistent global merge tree, deterministic derived cuts, multi-scale correspondence evidence, entity-local CIELAB reconstruction models, and an optional bounded sparse residual. It is **not** a general image codec, semantic vision system, identity system, or scientifically validated universal representation.
+Version **0.7.0** is a deterministic, non-semantic image-structure research workbench. An image submitted from an anonymous browser workspace or signed-in owner is represented as dense pixel features, segmented micro-regions, a sparse relationship graph, a persistent global merge tree, deterministic derived cuts, multi-scale correspondence evidence, entity-local CIELAB reconstruction models, and an optional bounded sparse residual. It is **not** a general image codec, semantic vision system, identity system, or scientifically validated universal representation.
 
 > The engine measures colour, texture, geometry, continuous gradients, masks, and local reconstruction error. It performs no classification, face recognition, semantic inference, training, or identity-based generation.
 
@@ -82,15 +82,15 @@ Residual mode quantizes RGB correction candidates and ranks them by their **meas
 
 `heuristicRateDistortion` and `artifactStorage` remain deliberately separate. Neither establishes a complete codec bit rate, perceptual rate-distortion curve, or compression claim.
 
-## Authenticated Ownership, Admission, and Retention
+## Browser-Workspace Ownership, Admission, and Access-Only Retention
 
-Creating an analysis and reading its result, entity, hierarchy, relationships, or artifact manifest require authentication. Every in-memory result is scoped to the submitting identity. A request for another user’s result returns `NOT_FOUND` rather than exposing whether it exists.
+Creating an analysis does not require authentication. Every result is scoped either to the signed-in submitting identity or to an anonymous opaque HttpOnly browser-workspace cookie. A request from another browser workspace or user returns `NOT_FOUND` rather than exposing whether it exists.
 
 Visitors may also run an analysis without signing in. On first use, the server issues an opaque HttpOnly browser-workspace cookie and scopes jobs, manifests, exact-error evidence, cancellation, and discard operations to that workspace. Results remain private to that browser and expire under the normal retention policy. Clearing browser data, changing browser/device, or waiting for expiry intentionally removes access; cross-device history requires a future account feature.
 
-Upload admission validates canonical base64 plus consistent filename extension, MIME type, and binary signature for PNG, JPEG, or WebP **before** accepting an asynchronous job. It enforces byte and pixel ceilings, temporary-workspace cleanup, a 120-second child-process limit, fixed-window per-user submission limits, and a process-local concurrent-job cap. A durable owner-scoped manifest records queued, running, uploading, completed, failed, cancelled, and discarded availability states. Completed result payloads can be restored after process-local cache eviction until their configured expiry; aggregate-only cache telemetry is administrator-only.
+Upload admission validates canonical base64 plus consistent filename extension, MIME type, and binary signature for PNG, JPEG, or WebP **before** accepting an asynchronous job. It enforces byte and pixel ceilings, temporary-workspace cleanup, a 120-second child-process limit, a bounded no-progress watchdog, fixed-window per-owner submission limits, and a process-local concurrent-job cap. A durable owner-scoped manifest records queued, running, uploading, completed, failed, cancelled, discarded, and expired availability states. Completed result payloads can be restored after process-local cache eviction until their configured expiry; aggregate-only cache telemetry is administrator-only.
 
-Users may cancel an in-flight analysis through the workbench. A cancellation terminates the active Python child process, records a terminal `cancelled` state, and never exposes a partial result. Users may also discard a completed analysis from the workbench. Discarding removes cached result and inspection evidence and revokes the manifest payload and workbench artifact references. The current storage interface does not expose physical object deletion, so discard is access revocation rather than an assertion of immediate backend byte erasure.
+Users may cancel an in-flight analysis through the workbench. A cancellation terminates the active Python child process, records a terminal `cancelled` state, and never exposes a partial result. The server records privacy-safe correlation and stage logs, and converts a no-progress child process into a safe terminal failure. Users may also discard a completed analysis from the workbench. Discarding or expiry removes cached result and inspection evidence and revokes the manifest payload and workbench artifact references. The current storage interface does not expose physical object deletion, so these are access revocations rather than assertions of immediate backend byte erasure.
 
 Thresholded ΔRGB previews are rendered server-side from private exact evidence, returned as bounded in-memory data URLs, and never create a new persistent storage object for each slider threshold.
 
@@ -106,7 +106,7 @@ Every segmentation run records requested, raw, and final region counts together 
 
 ## Reconstruction Modes and Appearance
 
-`constant` is the micro-region baseline. `parametric` is the adaptive CIELAB model, and `residual` is that model plus its bounded quantized correction. `full` and the primary `reconstructed.png` now both denote this final adaptive-plus-residual output; their artifact, exact error evidence, calibrated heatmap, and fidelity metrics therefore agree. The workbench defaults to its high-contrast scientific dark appearance and provides a persisted accessible header switch for a light alternative.
+`constant` is the **Constant baseline**. `parametric` is the **Adaptive model**, and `residual` is the **Residual detail** model plus its bounded quantized correction. `full` and the primary `reconstructed.png` both denote the **Final fidelity** adaptive-plus-residual output; their artifact, exact error evidence, calibrated heatmap, and fidelity metrics therefore agree. The workbench begins with upload, segmentation, and fidelity-profile essentials, defers expert configuration, and reveals result-only controls after completion. It defaults to its high-contrast scientific dark appearance and provides a persisted accessible header switch for a light alternative.
 
 Felzenszwalb and other high-cardinality outputs are reduced to the configured initial-region ceiling before pixel-feature entities or hierarchy candidates are built. The active global merge tree receives sparse 4-neighbour topology from the native label map and updates that topology after every accepted union, avoiding repeated all-pairs active-mask adjacency discovery. Child-process failures retain diagnostic stderr only in server logs; protected API clients receive a concise actionable failure message.
 
@@ -124,6 +124,6 @@ The active CLI is `python_engine/representation_engine.py`, invoked by the serve
 
 ## Privacy and Research Limits
 
-User-provided acceptance fixtures remain private, uncommitted, and excluded from semantic inference, training, classification, identity processing, and generated content. The engine operates only on pixels provided to the authenticated run.
+User-provided acceptance fixtures remain private, uncommitted, and excluded from semantic inference, training, classification, identity processing, and generated content. The engine operates only on pixels provided to the current browser-workspace or signed-in run.
 
 The workbench’s tests, benchmarks, sensitivity reports, reconstruction metrics, and segmentation diagnostics are internal engineering evidence. Learned segmentation, neural reconstruction, object recognition, face recognition, stochastic reconstruction, universal representation claims, codec-superiority claims, and external scientific validation are intentionally out of scope.

@@ -4,8 +4,10 @@ import { promisify } from "util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const storagePutMock = vi.hoisted(() => vi.fn());
+const saveAnalysisManifestMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./storage", () => ({ storagePut: storagePutMock }));
+vi.mock("./db", () => ({ saveAnalysisManifest: saveAnalysisManifestMock, getAnalysisManifest: vi.fn(), discardAnalysisManifest: vi.fn(), expireAnalysisManifest: vi.fn() }));
 
 import { analyzeImage } from "./imageAnalysis";
 
@@ -18,6 +20,7 @@ describe("Node-to-Python image analysis integration", () => {
 
   beforeEach(async () => {
     uploadedArtifacts.length = 0;
+    saveAnalysisManifestMock.mockReset();
     storagePutMock.mockImplementation(async (key: string, data: Buffer, contentType: string) => {
       uploadedArtifacts.push({ key, data: Buffer.from(data), contentType });
       return { key, url: `/manus-storage/${key}` };
@@ -31,7 +34,12 @@ describe("Node-to-Python image analysis integration", () => {
 
   it("spawns the real Python engine and exports valid representations", async () => {
     const request = JSON.parse(await fs.readFile(requestPath, "utf8")) as { json: Parameters<typeof analyzeImage>[0] };
-    const result = await analyzeImage(request.json);
+    const progressStages: string[] = [];
+    saveAnalysisManifestMock.mockImplementation(async manifest => {
+      expect(progressStages).toContain("finalizing");
+      expect(manifest).toMatchObject({ status: "completed", payload: expect.any(String) });
+    });
+    const result = await analyzeImage(request.json, "integration-owner", "integration-owner", { onProgress: event => progressStages.push(event.stage) });
     const representation = result.representation as {
       pixelLevel: { assignmentKey: string };
       hierarchy: { rootId: string; treeNodeIds: string[]; cuts: Record<string, { nodeIds: string[]; targetNodeCount: number }> };
@@ -63,5 +71,7 @@ describe("Node-to-Python image analysis integration", () => {
     expect(pngArtifacts).toHaveLength(28);
     expect(pngArtifacts.every(item => item.data.subarray(1, 4).toString("ascii") === "PNG")).toBe(true);
     expect(svgArtifact?.data.toString("utf8").trimStart()).toMatch(/^<svg/);
+    expect(progressStages.at(-1)).toBe("finalizing");
+    expect(saveAnalysisManifestMock).toHaveBeenCalledTimes(1);
   }, 120_000);
 });

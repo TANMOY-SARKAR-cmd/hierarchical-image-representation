@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,6 @@ const telemetryQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading
 const thresholdedHeatmapQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const localErrorQuery = vi.hoisted(() => ({ data: undefined as unknown, isLoading: false }));
 const authState = vi.hoisted(() => ({ user: null as { role: string } | null }));
-const startLogin = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
@@ -30,11 +29,10 @@ vi.mock("@/lib/trpc", () => ({
 }));
 
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => authState }));
-vi.mock("@/const", () => ({ startLogin }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-import Home, { filterRelationships, relationshipRenderKey } from "./Home";
+import Home, { AnalysisProgressPanel, filterRelationships, relationshipRenderKey } from "./Home";
 
 const baseRelationship = { sourceId: "micro-1", targetId: "micro-2", distance: 8, angle: 0, sizeRatio: 1, colorDistance: 2, colorSimilarity: 0.95, shapeSimilarity: 0.9, textureSimilarity: 0.8, brightnessDifference: 0.02, brightnessRatio: 1.02, normalizedDx: 0.05, normalizedDy: 0, boundaryContactRatio: 0.25, containmentRatio: 0, overlapRatio: 0, containment: "none" };
 const makeEntity = (id: string, children: string[] = []) => ({ id, type: id === "image-root" ? "image" : "micro_region", level: id === "image-root" ? 5 : 1, scaleFactor: 1, geometry: { boundingBox: [0, 0, 10, 10], centroid: id === "micro-1" ? [4, 4] : [12, 12], area: 64, perimeter: 32, orientation: 0, compactness: 0.7 }, appearance: { meanRGB: [20, 140, 210], brightness: 0.52, varianceRGB: [1, 1, 1] }, appearanceModel: { schema: "AppearanceModel@0.5", model: "affine", parameterCount: 9, mseLab: 0.004, selectionScore: 0.008, boundaryResidual: 0.001, coefficients: [] }, statistics: { memberPixelCount: 64, complexity: 0.4 }, vector: { schema: "RegionVector@0.5", dimension: 20, values: Array.from({ length: 20 }, () => 0), provenance: "pixel_aggregate", aggregation: "mean" }, memberPixels: [], children, parentId: id === "image-root" ? null : "image-root", crossScaleMatchId: null });
@@ -63,7 +61,6 @@ describe("Hierarchy workbench UI", () => {
     resultQuery.data = undefined;
     thresholdedHeatmapQuery.data = undefined;
     localErrorQuery.data = undefined;
-    startLogin.mockReset();
     telemetryQuery.data = undefined;
     telemetryQuery.isLoading = false;
     authState.user = null;
@@ -74,16 +71,16 @@ describe("Hierarchy workbench UI", () => {
     vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:fixture"), revokeObjectURL: vi.fn() });
   });
 
-  it("renders the analytical empty state and enables analysis after a supported image is selected", () => {
+  it("renders a no-login first-use flow and enables analysis after a supported image is selected", () => {
     const { container } = render(<Home />);
     const analysisButton = screen.getByRole("button", { name: /run analysis/i });
     expect(screen.getByRole("heading", { name: /hierarchical image workbench/i })).toBeInTheDocument();
-    expect(screen.getByText("NO ENTITY TREE LOADED")).toBeInTheDocument();
-    expect(screen.getByText("Complexity heatmap")).toBeInTheDocument();
-    expect(screen.getByText("Relationship graph")).toBeInTheDocument();
-    expect(screen.getByText("Graph-edge filters")).toBeInTheDocument();
-    expect(screen.getByText(/narrow sparse graph edges/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "FULL" })).toBeDisabled();
+    expect(screen.getByText(/No sign-in required/i)).toBeInTheDocument();
+    expect(screen.getByText("Advanced configuration")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Felzenszwalb" })).toBeInTheDocument();
+    expect(screen.queryByText("Graph-edge filters")).not.toBeInTheDocument();
+    expect(screen.queryByText("Complexity heatmap")).not.toBeInTheDocument();
+    expect(screen.queryByText("NO ENTITY TREE LOADED")).not.toBeInTheDocument();
     expect(analysisButton).toBeDisabled();
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -114,7 +111,7 @@ describe("Hierarchy workbench UI", () => {
   it("shows the truthful server-reported analysis stage and percentage while a job is active", async () => {
     authState.user = { role: "user" };
     startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
-    jobStatusQuery.data = { jobId: "job-1", status: "running", stage: "segmentation", percent: 38, message: "Built deterministic micro-regions across the requested image scales.", createdAt: Date.now() - 4_000, updatedAt: Date.now(), completedAt: null, error: null, resultAvailable: false };
+    jobStatusQuery.data = { jobId: "job-1", status: "running", stage: "segmentation", percent: 38, message: "Built deterministic micro-regions across the requested image scales.", createdAt: Date.now() - 4_000, updatedAt: Date.now(), completedAt: null, expiresAt: Date.now() + 1_800_000, error: null, resultAvailable: false };
     const view = render(<Home />);
     fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
     fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
@@ -128,7 +125,7 @@ describe("Hierarchy workbench UI", () => {
     authState.user = { role: "user" };
     startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
     cancelMutation.mutateAsync.mockResolvedValue({ jobId: "job-1", status: "cancelled" });
-    jobStatusQuery.data = { jobId: "job-1", status: "running", stage: "segmentation", percent: 38, message: "Built deterministic micro-regions.", createdAt: Date.now() - 4_000, updatedAt: Date.now(), completedAt: null, error: null, resultAvailable: false };
+    jobStatusQuery.data = { jobId: "job-1", status: "running", stage: "segmentation", percent: 38, message: "Built deterministic micro-regions.", createdAt: Date.now() - 4_000, updatedAt: Date.now(), completedAt: null, expiresAt: Date.now() + 1_800_000, error: null, resultAvailable: false };
     const view = render(<Home />);
     fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
     fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
@@ -136,12 +133,40 @@ describe("Hierarchy workbench UI", () => {
     expect(cancelMutation.mutateAsync).toHaveBeenCalledWith({ jobId: "job-1" });
   });
 
+  it("advances the visible elapsed timer independently of status polling", () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      const view = render(<AnalysisProgressPanel job={{ jobId: "job-1", status: "running", stage: "segmentation", percent: 38, message: "Building deterministic micro-regions.", createdAt: now - 2_000, updatedAt: now, completedAt: null, expiresAt: now + 1_800_000, error: null, resultAvailable: false }} />);
+      expect(view.getByText(/2s elapsed/i)).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(2_000));
+      expect(view.getByText(/4s elapsed/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("explains access-only retention and sends the current result to the discard endpoint", async () => {
+    startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
+    discardMutation.mutateAsync.mockResolvedValue({ jobId: "job-1", discarded: true });
+    const now = Date.now();
+    jobStatusQuery.data = { jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: now - 1_000, updatedAt: now, completedAt: now, expiresAt: now + 1_800_000, error: null, resultAvailable: true };
+    resultQuery.data = { ...completedResult, jobId: "job-1" };
+    const view = render(<Home />);
+    fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });
+    fireEvent.click(view.getByRole("button", { name: /run analysis/i }));
+    const discard = await view.findByRole("button", { name: "Discard access" });
+    expect(view.getByText(/not a physical storage-deletion claim/i)).toBeInTheDocument();
+    fireEvent.click(discard);
+    await waitFor(() => expect(discardMutation.mutateAsync).toHaveBeenCalledWith({ jobId: "job-1" }));
+  });
+
   it("renders duplicate-endpoint relationships without a React duplicate-key warning", async () => {
     const first = { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent"], primaryType: "adjacent", adjacent: true };
     const second = { ...baseRelationship, normalizedDistance: 0.1, confidence: 0.92, relationshipType: ["adjacent"], primaryType: "adjacent", adjacent: true };
     authState.user = { role: "user" };
     startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
-    jobStatusQuery.data = { jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: Date.now() - 1_000, updatedAt: Date.now(), completedAt: Date.now(), error: null, resultAvailable: true };
+    jobStatusQuery.data = { jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: Date.now() - 1_000, updatedAt: Date.now(), completedAt: Date.now(), expiresAt: Date.now() + 1_800_000, error: null, resultAvailable: true };
     resultQuery.data = { ...completedResult, jobId: "job-1", representation: { ...completedResult.representation, relationships: [first, second] } };
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
@@ -176,7 +201,7 @@ describe("Hierarchy workbench UI", () => {
   it("applies interactive edge controls and resets the filtered graph", async () => {
     authState.user = { role: "user" };
     startMutation.mutateAsync.mockResolvedValue({ jobId: "job-1" });
-    jobStatusQuery.data = { jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: Date.now() - 1_000, updatedAt: Date.now(), completedAt: Date.now(), error: null, resultAvailable: true };
+    jobStatusQuery.data = { jobId: "job-1", status: "completed", stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", createdAt: Date.now() - 1_000, updatedAt: Date.now(), completedAt: Date.now(), expiresAt: Date.now() + 1_800_000, error: null, resultAvailable: true };
     resultQuery.data = { ...completedResult, jobId: "job-1", representation: { ...completedResult.representation, reconstruction_metadata: { ...completedResult.representation.reconstruction_metadata, residual: { coverage: 0.34, actualEncodedBytes: 196_608, quantizationStep: 4, artifactEmitted: true } } } };
     const view = render(<Home />);
     fireEvent.change(view.container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [new File(["fixture"], "specimen.png", { type: "image/png" })] } });

@@ -70,6 +70,10 @@ const analysisInput = z.object({
   config: analysisConfig,
 });
 
+function safeUnexpectedAnalysisMessage() {
+  return "The analysis service could not complete this request. Please retry shortly.";
+}
+
 export const imageAnalysisRouter = router({
   process: publicProcedure
     .input(analysisInput)
@@ -85,7 +89,7 @@ export const imageAnalysisRouter = router({
         if (error instanceof AnalysisEngineError) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: error.message });
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: error instanceof Error ? error.message : "Image analysis could not be completed.",
+          message: safeUnexpectedAnalysisMessage(),
         });
       }
     }),
@@ -95,9 +99,9 @@ export const imageAnalysisRouter = router({
       return await startAnalysisJob(input, ownerId, visitorAdmissionKey(ctx, ownerId));
     } catch (error) {
       if (error instanceof AnalysisAdmissionError) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
-      if (error instanceof AnalysisInputError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
-      if (error instanceof AnalysisEngineError) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: error.message });
-      throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Image analysis could not be started." });
+        if (error instanceof AnalysisInputError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        if (error instanceof AnalysisEngineError) throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: error.message });
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: safeUnexpectedAnalysisMessage() });
     }
   }),
   status: publicProcedure.input(z.object({ jobId: z.string().min(1) })).query(async ({ input, ctx }) => {
@@ -116,15 +120,15 @@ export const imageAnalysisRouter = router({
   localError: publicProcedure.input(z.object({ jobId: z.string().min(1), mode: z.string().min(1).max(32), x: z.number().int().min(0).max(2_000_000), y: z.number().int().min(0).max(2_000_000) })).query(async ({ input, ctx }) => {
     try {
       return await getLocalErrorSample(input.jobId, resolveAnalysisOwner(ctx), input.mode, input.x, input.y);
-    } catch (error) {
-      throw new TRPCError({ code: "NOT_FOUND", message: error instanceof Error ? error.message : "Exact error evidence is unavailable." });
+    } catch {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Exact error evidence is unavailable for the current browser." });
     }
   }),
   thresholdedHeatmap: publicProcedure.input(z.object({ jobId: z.string().min(1), mode: z.string().min(1).max(32), thresholdDelta: z.number().int().min(0).max(32) })).query(async ({ input, ctx }) => {
     try {
       return await getThresholdedErrorHeatmap(input.jobId, resolveAnalysisOwner(ctx), input.mode, input.thresholdDelta);
-    } catch (error) {
-      throw new TRPCError({ code: "NOT_FOUND", message: error instanceof Error ? error.message : "Thresholded error heatmap is unavailable." });
+    } catch {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Thresholded error heatmap is unavailable for the current browser." });
     }
   }),
   entity: publicProcedure.input(z.object({ jobId: z.string().min(1), entityId: z.string().min(1) })).query(async ({ input, ctx }) => {

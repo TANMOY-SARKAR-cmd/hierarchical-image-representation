@@ -28,10 +28,12 @@ export type InsertUser = typeof users.$inferInsert;
 export const analysisManifests = mysqlTable("analysisManifests", {
   jobId: varchar("jobId", { length: 64 }).primaryKey(),
   ownerId: varchar("ownerId", { length: 64 }).notNull(),
-  status: mysqlEnum("status", ["queued", "running", "uploading", "completed", "failed", "cancelled", "discarded"]).notNull(),
+  status: mysqlEnum("status", ["queued", "running", "uploading", "completed", "failed", "cancelled", "discarded", "expired"]).notNull(),
   expiresAt: timestamp("expiresAt").notNull(),
   completedAt: timestamp("completedAt"),
   discardedAt: timestamp("discardedAt"),
+  revokedAt: timestamp("revokedAt"),
+  revocationReason: varchar("revocationReason", { length: 32 }),
   error: text("error"),
   payload: mediumtext("payload"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

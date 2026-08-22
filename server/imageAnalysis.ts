@@ -6,7 +6,7 @@ import { gunzipSync } from "zlib";
 import { nanoid } from "nanoid";
 import { PNG } from "pngjs";
 import { storageGetSignedUrl, storagePut } from "./storage";
-import { discardAnalysisManifest, getAnalysisManifest, saveAnalysisManifest } from "./db";
+import { discardAnalysisManifest, expireAnalysisManifest, getAnalysisManifest, saveAnalysisManifest } from "./db";
 
 export type AnalysisConfig = {
   maxFileSizeBytes: number;
@@ -86,13 +86,14 @@ export type AnalysisResult = {
 export type AnalysisJobStatus = {
   jobId: string;
   ownerId: string;
-  status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled";
+  status: "queued" | "running" | "uploading" | "completed" | "failed" | "cancelled" | "expired";
   stage: string;
   percent: number;
   message: string;
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
+  expiresAt: number;
   error: string | null;
   resultAvailable: boolean;
 };
@@ -124,6 +125,7 @@ const DEFAULT_RESULT_CACHE_CAPACITY = 100;
 const DEFAULT_SUBMISSION_WINDOW_MS = 60 * 1000;
 const DEFAULT_SUBMISSION_MAX_PER_WINDOW = 3;
 const DEFAULT_MAX_INFLIGHT_ANALYSES = 2;
+const DEFAULT_PROGRESS_TIMEOUT_MS = 45 * 1000;
 const ERROR_HEATMAP_REFERENCE_DELTA = 32;
 const MAX_THRESHOLD_HEATMAPS = 96;
 const decodedErrorEvidence = new Map<string, { width: number; height: number; values: Uint16Array }>();
@@ -259,7 +261,7 @@ export class AnalysisJobStore {
 
   create(jobId: string, ownerId: string, now = Date.now()) {
     this.purge(now);
-    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, error: null, resultAvailable: false };
+    const job: AnalysisJobStatus = { jobId, ownerId, status: "queued", stage: "queued", percent: 0, message: "Queued for secure server-side analysis.", createdAt: now, updatedAt: now, completedAt: null, expiresAt: now + this.ttlMs, error: null, resultAvailable: false };
     this.jobs.set(jobId, job);
     return job;
   }
@@ -275,7 +277,7 @@ export class AnalysisJobStore {
   complete(jobId: string, now = Date.now()) {
     const job = this.jobs.get(jobId);
     if (!job) return null;
-    const next = { ...job, status: "completed" as const, stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, error: null, resultAvailable: true };
+    const next = { ...job, status: "completed" as const, stage: "completed", percent: 100, message: "Analysis and private artifact upload completed.", updatedAt: now, completedAt: now, expiresAt: now + this.ttlMs, error: null, resultAvailable: true };
     this.jobs.set(jobId, next);
     return next;
   }
@@ -299,6 +301,10 @@ export class AnalysisJobStore {
   get(jobId: string, now = Date.now()) {
     this.purge(now);
     return this.jobs.get(jobId) ?? null;
+  }
+
+  remove(jobId: string) {
+    this.jobs.delete(jobId);
   }
 
   private purge(now: number) {
@@ -367,34 +373,56 @@ function runPython(inputPath: string, outputPath: string, config: AnalysisConfig
     let stdout = "";
     let stdoutBuffer = "";
     let stderr = "";
+    const progressTimeoutMs = positiveInteger(process.env.ANALYSIS_PROGRESS_TIMEOUT_MS, DEFAULT_PROGRESS_TIMEOUT_MS);
+    let livenessTimeout: ReturnType<typeof setTimeout> | null = null;
+    const clearLivenessTimeout = () => {
+      if (livenessTimeout) clearTimeout(livenessTimeout);
+      livenessTimeout = null;
+    };
+    const armLivenessTimeout = () => {
+      clearLivenessTimeout();
+      livenessTimeout = setTimeout(() => {
+        console.error(`[ImageAnalysis] Job ${jobId ?? "direct"} did not report progress within ${progressTimeoutMs} ms.`);
+        processHandle.kill("SIGKILL");
+        reject(new AnalysisEngineError("The analysis engine did not report progress in time. Please retry with a smaller image or less detail."));
+      }, progressTimeoutMs);
+    };
     const timeout = setTimeout(() => {
       processHandle.kill("SIGKILL");
-      reject(new Error("Image analysis exceeded the 120-second processing limit."));
+      reject(new AnalysisEngineError("The analysis exceeded the processing limit. Please retry with a smaller image or less detail."));
     }, 120_000);
+    console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} started Python analysis.`);
+    armLivenessTimeout();
     processHandle.stdout.on("data", chunk => {
       const text = chunk.toString();
-      stdout += text;
+      stdout = (stdout + text).slice(-1_000_000);
       stdoutBuffer += text;
       const lines = stdoutBuffer.split("\n");
       stdoutBuffer = lines.pop() ?? "";
       for (const line of lines) {
         try {
           const event = JSON.parse(line) as { event?: string; stage?: string; percent?: number; message?: string };
-          if (event.event === "progress" && typeof event.stage === "string" && typeof event.percent === "number" && typeof event.message === "string") onProgress?.({ status: "running", stage: event.stage, percent: event.percent, message: event.message });
+          if (event.event === "progress" && typeof event.stage === "string" && typeof event.percent === "number" && typeof event.message === "string") {
+            armLivenessTimeout();
+            console.info(`[ImageAnalysis] Job ${jobId ?? "direct"} progressed to ${event.stage} (${event.percent}%).`);
+            onProgress?.({ status: "running", stage: event.stage, percent: event.percent, message: event.message });
+          }
         } catch {
           // The final completion record is parsed after process closure; unrelated diagnostic output is not progress.
         }
       }
     });
     processHandle.stderr.on("data", chunk => {
-      stderr += chunk.toString();
+      stderr = (stderr + chunk.toString()).slice(-8_000);
     });
     processHandle.on("error", error => {
       clearTimeout(timeout);
+      clearLivenessTimeout();
       reject(new Error(`Could not start the Python analysis engine: ${error.message}`));
     });
     processHandle.on("close", code => {
       clearTimeout(timeout);
+      clearLivenessTimeout();
       if (jobId) activeProcesses.delete(jobId);
       if (jobId && cancelledJobIds.has(jobId)) {
         cancelledJobIds.delete(jobId);
@@ -559,9 +587,9 @@ export async function analyzeImage(input: {
       errors,
     };
       const result = { jobId, ownerId, representation, artifactUrls, errorEvidence };
+      run?.onProgress?.({ status: "uploading", stage: "finalizing", percent: 99, message: "Finalizing owner-scoped analysis results." });
       activeResults.remember(result);
       await saveAnalysisManifest({ jobId, ownerId, status: "completed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), payload: JSON.stringify(result) });
-      run?.onProgress?.({ status: "uploading", stage: "finalizing", percent: 99, message: "Finalizing owner-scoped analysis results." });
       return result;
     } finally {
       await fs.rm(workspace, { recursive: true, force: true });
@@ -576,11 +604,38 @@ function clearLocalJobEvidence(jobId: string) {
   for (const key of Array.from(decodedErrorEvidence.keys())) if (key.includes(`/${jobId}/`)) decodedErrorEvidence.delete(key);
 }
 
-export async function getAnalysisResult(jobId: string) {
-  const cached = activeResults.get(jobId);
-  if (cached) return cached;
+async function revokeLocalResultAccess(jobId: string, ownerId: string, reason: "discarded" | "expired") {
+  activeResults.remove(jobId);
+  activeJobs.remove(jobId);
+  clearLocalJobEvidence(jobId);
+  console.info(`[ImageAnalysis] Job ${jobId} access revoked (${reason}).`);
+  return reason === "discarded"
+    ? discardAnalysisManifest(jobId, ownerId)
+    : expireAnalysisManifest(jobId, ownerId);
+}
+
+async function ensureManifestAccess(jobId: string) {
   const manifest = await getAnalysisManifest(jobId);
-  if (!manifest || manifest.status !== "completed" || manifest.expiresAt.getTime() <= Date.now() || !manifest.payload) {
+  if (!manifest) return null;
+  if (manifest.status === "discarded" || manifest.status === "expired") {
+    activeResults.remove(jobId);
+    activeJobs.remove(jobId);
+    clearLocalJobEvidence(jobId);
+    return null;
+  }
+  if (manifest.expiresAt.getTime() <= Date.now()) {
+    await revokeLocalResultAccess(jobId, manifest.ownerId, "expired");
+    return null;
+  }
+  return manifest;
+}
+
+export async function getAnalysisResult(jobId: string) {
+  const manifest = await ensureManifestAccess(jobId);
+  if (manifest && manifest.status !== "completed") return null;
+  const cached = activeResults.get(jobId);
+  if (cached && (!manifest || cached.ownerId === manifest.ownerId)) return cached;
+  if (!manifest || !manifest.payload) {
     clearLocalJobEvidence(jobId);
     return null;
   }
@@ -599,6 +654,7 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
   submissionAdmission.acquire(admissionKey);
   const jobId = nanoid(14);
   const job = activeJobs.create(jobId, ownerId);
+  console.info(`[ImageAnalysis] Job ${jobId} admitted for server-side analysis.`);
   try {
     await saveAnalysisManifest({ jobId, ownerId, status: "queued", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS) });
   } catch (error) {
@@ -613,23 +669,28 @@ export async function startAnalysisJob(input: { fileName: string; mimeType: stri
   } })
     .then(async () => {
       activeJobs.complete(jobId);
+      console.info(`[ImageAnalysis] Job ${jobId} completed and private references were persisted.`);
     })
     .catch(async error => {
       const cancelled = error instanceof AnalysisCancelledError;
+      const safeError = error instanceof AnalysisEngineError
+        ? error.message
+        : "The analysis could not complete. Please retry with a smaller image or less detail.";
       if (cancelled) activeJobs.cancel(jobId);
-      else activeJobs.fail(jobId, error instanceof Error ? error.message : "Image analysis could not be completed.");
-      await saveAnalysisManifest({ jobId, ownerId, status: cancelled ? "cancelled" : "failed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), error: cancelled ? null : error instanceof Error ? error.message : "Image analysis could not be completed." }).catch(() => undefined);
+      else activeJobs.fail(jobId, safeError);
+      console.error(`[ImageAnalysis] Job ${jobId} ended ${cancelled ? "cancelled" : "failed"}.`);
+      await saveAnalysisManifest({ jobId, ownerId, status: cancelled ? "cancelled" : "failed", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date(), error: cancelled ? null : safeError }).catch(() => undefined);
     });
   return job;
 }
 
 export async function getAnalysisJob(jobId: string) {
   const active = activeJobs.get(jobId);
-  if (active) return active;
-  const manifest = await getAnalysisManifest(jobId);
-  if (!manifest || manifest.status === "discarded" || manifest.expiresAt.getTime() <= Date.now()) return null;
+  const manifest = await ensureManifestAccess(jobId);
+  if (!manifest) return active ?? null;
+  if (active && active.ownerId === manifest.ownerId) return active;
   const terminal = manifest.status === "completed" || manifest.status === "failed" || manifest.status === "cancelled";
-  return { jobId, ownerId: manifest.ownerId, status: manifest.status as AnalysisJobStatus["status"], stage: manifest.status, percent: manifest.status === "completed" ? 100 : 0, message: terminal ? manifest.status === "completed" ? "Analysis result remains available." : manifest.status === "cancelled" ? "Analysis was cancelled." : "Analysis did not complete." : "Analysis state is being restored.", createdAt: manifest.createdAt.getTime(), updatedAt: manifest.updatedAt.getTime(), completedAt: manifest.completedAt?.getTime() ?? null, error: manifest.error ?? null, resultAvailable: manifest.status === "completed" };
+  return { jobId, ownerId: manifest.ownerId, status: manifest.status as AnalysisJobStatus["status"], stage: manifest.status, percent: manifest.status === "completed" ? 100 : 0, message: terminal ? manifest.status === "completed" ? "Analysis result remains available." : manifest.status === "cancelled" ? "Analysis was cancelled." : "Analysis did not complete." : "Analysis state is being restored.", createdAt: manifest.createdAt.getTime(), updatedAt: manifest.updatedAt.getTime(), completedAt: manifest.completedAt?.getTime() ?? null, expiresAt: manifest.expiresAt.getTime(), error: manifest.error ?? null, resultAvailable: manifest.status === "completed" };
 }
 
 export async function cancelAnalysisJob(jobId: string, ownerId: string) {
@@ -638,17 +699,15 @@ export async function cancelAnalysisJob(jobId: string, ownerId: string) {
   if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return job;
   cancelledJobIds.add(jobId);
   activeProcesses.get(jobId)?.kill("SIGKILL");
-  const cancelled = activeJobs.cancel(jobId) ?? { ...job, status: "cancelled" as const, stage: "cancelled", percent: job.percent, message: "Analysis was cancelled before completion.", completedAt: Date.now(), updatedAt: Date.now(), error: null, resultAvailable: false };
+  const cancelled = activeJobs.cancel(jobId) ?? { ...job, status: "cancelled" as const, stage: "cancelled", percent: job.percent, message: "Analysis was cancelled before completion.", completedAt: Date.now(), updatedAt: Date.now(), expiresAt: Date.now() + DEFAULT_RESULT_TTL_MS, error: null, resultAvailable: false };
   await saveAnalysisManifest({ jobId, ownerId, status: "cancelled", expiresAt: new Date(Date.now() + DEFAULT_RESULT_TTL_MS), completedAt: new Date() }).catch(() => undefined);
   return cancelled;
 }
 
 export async function discardAnalysisResult(jobId: string, ownerId: string) {
-  const result = await getAnalysisResult(jobId);
-  if (!result || result.ownerId !== ownerId) return false;
-  activeResults.remove(jobId);
-  clearLocalJobEvidence(jobId);
-  return discardAnalysisManifest(jobId, ownerId);
+  const manifest = await ensureManifestAccess(jobId);
+  if (!manifest || manifest.ownerId !== ownerId || manifest.status !== "completed") return false;
+  return revokeLocalResultAccess(jobId, ownerId, "discarded");
 }
 
 export function getAnalysisCacheTelemetry() {
