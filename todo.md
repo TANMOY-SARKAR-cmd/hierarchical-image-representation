@@ -188,6 +188,6 @@
 - [x] Validate, checkpoint, publish, and verify the inspector crash repair.
 - [x] Add owner-private telemetry for bounded active merge-tree budget extensions without exposing raw engine or infrastructure diagnostics.
 - [x] Extend standard analysis only while recent merge-tree heartbeats continue, retaining the 45-second silence watchdog and a finite normal ceiling.
-- [ ] Add status disclosure and lifecycle/UI/smoke regressions for active extensions, silence rejection, and hard normal-ceiling exhaustion.
-- [ ] Benchmark preview-equivalent fixtures and validate local/published full-fidelity parity after the bounded extension repair.
-- [ ] Validate, document, checkpoint, synchronize, and deliver the public merge-tree budget-parity release.
+- [x] Add status disclosure and lifecycle/UI/smoke regressions for active extensions, silence rejection, and hard normal-ceiling exhaustion.
+- [x] Benchmark preview-equivalent fixtures and validate local/published full-fidelity parity after the bounded extension repair.
+- [x] Validate, document, checkpoint, synchronize, and deliver the public merge-tree budget-parity release.
